@@ -8,6 +8,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const defaultOrigin = { lat: 52.196, lon: 21.022 };
 type Point = { lat: number; lon: number };
 type Simulation = { simulation_id: string; map_data_url: string; reachable_stops: number; disclaimer: string; data_version: string };
+type GeocodeResult = { label: string; lat: number; lon: number };
 
 export function ScenarioWorkspace() {
   const [originLabel, setOriginLabel] = useState("ul. Puławska 100, Warszawa");
@@ -20,6 +21,7 @@ export function ScenarioWorkspace() {
   const [isChoosingOrigin, setIsChoosingOrigin] = useState(false);
   const [mapData, setMapData] = useState<ReachabilityMap | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
+  const [geocodeResults, setGeocodeResults] = useState<GeocodeResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [notice, setNotice] = useState("Ustaw punkt startowy, parametry i wygeneruj mapę zasięgu.");
   const weekday = useMemo(() => new Intl.DateTimeFormat("pl-PL", { weekday: "long" }).format(new Date(`${date}T12:00:00`)), [date]);
@@ -32,6 +34,16 @@ export function ScenarioWorkspace() {
   function toggleMode(mode: string) { setSelectedModes(current => current.includes(mode) ? current.filter(item => item !== mode) : [...current, mode]); }
   function setPreset(value: number) { setLimit(value); setCustomLimit(""); }
   function setCustom(value: string) { setCustomLimit(value); const minutes = Number(value); if (Number.isFinite(minutes) && minutes >= 5 && minutes <= 180) setLimit(minutes); }
+
+  async function searchOrigin() {
+    setNotice("Szukam adresu…"); setGeocodeResults([]);
+    try {
+      const response = await fetch(`${API_URL}/api/geocode?q=${encodeURIComponent(originLabel)}`);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail ?? "Nie udało się wyszukać adresu.");
+      setGeocodeResults(result.results); setNotice(result.results.length ? "Wybierz właściwy adres z listy." : "Nie znaleziono adresu. Spróbuj podać ulicę i numer.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Nie mogę połączyć się z usługą adresową."); }
+  }
 
   async function simulate(event: FormEvent) {
     event.preventDefault();
@@ -57,7 +69,7 @@ export function ScenarioWorkspace() {
     <section className="workspace">
       <form className="controls panel" onSubmit={simulate}>
         <div><span className="eyebrow">SCENARIUSZ</span><h1>Mapa dostępności</h1><p className="muted">Wskaż start i zobacz obszary osiągalne w wybranym czasie.</p></div>
-        <label>Start<input value={originLabel} onChange={event => setOriginLabel(event.target.value)} aria-label="Punkt początkowy" /><button className="route-button" type="button" onClick={() => { setIsChoosingOrigin(true); setNotice("Kliknij mapę, aby ustawić punkt startowy."); }}>Wybierz na mapie</button></label>
+        <label>Start<input value={originLabel} onChange={event => { setOriginLabel(event.target.value); setGeocodeResults([]); }} aria-label="Punkt początkowy" /><div className="address-actions"><button className="route-button" type="button" onClick={searchOrigin}>Znajdź adres</button><button className="route-button" type="button" onClick={() => { setIsChoosingOrigin(true); setNotice("Kliknij mapę, aby ustawić punkt startowy."); }}>Wybierz na mapie</button></div></label>{geocodeResults.length > 0 && <ul className="address-results">{geocodeResults.map(result => <li key={`${result.lat}:${result.lon}`}><button type="button" onClick={() => onOriginChange(result)}>{result.label}</button></li>)}</ul>}
         <div className="split"><label>Data<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label>Godzina<input type="time" value={time} onChange={event => setTime(event.target.value)} /></label></div><span className="weekday">{weekday}</span>
         <fieldset><legend>Limit podróży</legend><div className="pills">{[15, 30, 45, 60].map(value => <button type="button" className={value === limit && !customLimit ? "active" : ""} onClick={() => setPreset(value)} key={value}>{value} min</button>)}</div><label className="custom-limit">Własny limit (5–180 min)<input inputMode="numeric" value={customLimit} placeholder="np. 75" onChange={event => setCustom(event.target.value)} /></label></fieldset>
         <fieldset><legend>Środki transportu</legend><div className="modes">{modes.map(mode => <label key={mode}><input type="checkbox" checked={selectedModes.includes(mode)} onChange={() => toggleMode(mode)} />{mode}</label>)}</div></fieldset>

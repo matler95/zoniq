@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from .geocoding import search_address
 from .gtfs import find_direct_journeys, find_one_transfer_journeys, latest_report
 from .schemas import JourneyRequest, JourneyResponse, SimulationRequest, SimulationResponse
 from .simulation import create_simulation, simulation_map
@@ -29,6 +30,14 @@ def data_status() -> dict[str, object]:
     if report is None:
         return {"status": "pending_import", "data_version": "demo", "next_step": "Prepare a GTFS archive with python -m app.gtfs prepare"}
     return {"status": "ready", "data_version": report.sha256[:12], "feed": report.as_dict(), "next_step": "Direct scheduled journeys are ready; transfer rounds are next."}
+
+
+@app.get("/api/geocode")
+def get_geocode(q: str) -> dict[str, object]:
+    try:
+        return {"results": search_address(q)}
+    except OSError as error:
+        raise HTTPException(status_code=503, detail="Usługa wyszukiwania adresów jest chwilowo niedostępna.") from error
 
 
 @app.post("/api/simulations", response_model=SimulationResponse, status_code=201)
