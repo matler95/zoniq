@@ -40,6 +40,7 @@ def create_simulation(request: SimulationRequest, database: Path) -> SimulationR
         "geometry": {"type": "Point", "coordinates": [stop["lon"], stop["lat"]]},
         "properties": {key: value for key, value in stop.items() if key not in {"lat", "lon"}},
     } for stop in stops]
+    time_bands = {str(minutes): sum(float(stop["travel_minutes"]) <= minutes for stop in stops) for minutes in (15, 30, 45, 60, request.max_travel_time_minutes)}
     _SIMULATIONS[simulation_id] = {
         "type": "FeatureCollection",
         "features": features,
@@ -52,6 +53,7 @@ def create_simulation(request: SimulationRequest, database: Path) -> SimulationR
         disclaimer="Warstwa pokazuje planowo osiągalne przystanki. Obsługuje kursy bezpośrednie i jedną przesiadkę na tym samym przystanku; izochrony i dojścia po sieci OSM są kolejnym etapem.",
         map_data_url=f"/api/simulations/{simulation_id}/map",
         reachable_stops=len(features),
+        time_bands=time_bands,
     )
 
 
