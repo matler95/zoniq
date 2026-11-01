@@ -2,7 +2,7 @@ from datetime import date
 from pathlib import Path
 from zipfile import ZipFile
 
-from app.gtfs import find_direct_journeys, find_one_transfer_journeys, prepare_store
+from app.gtfs import find_direct_journeys, find_one_transfer_journeys, find_reachable_stops, prepare_store
 
 
 def make_direct_feed(path: Path) -> None:
@@ -30,6 +30,10 @@ def test_prepared_store_returns_direct_scheduled_journey(tmp_path: Path) -> None
     assert len(journeys) == 1
     assert journeys[0]["route"] == "M1"
     assert journeys[0]["duration_minutes"] == 20.0
+
+    reachable = find_reachable_stops(database, (52.200, 21.000), date(2026, 11, 2), 7 * 3600 + 50 * 60, 30, (1,))
+    assert reachable[0]["stop_id"] == "ztm:B"
+    assert reachable[0]["travel_minutes"] == 20.0
 
 
 def test_prepared_store_finds_one_transfer_from_calendar_dates(tmp_path: Path) -> None:

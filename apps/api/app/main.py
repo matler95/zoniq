@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from .gtfs import find_direct_journeys, find_one_transfer_journeys, latest_report
 from .schemas import JourneyRequest, JourneyResponse, SimulationRequest, SimulationResponse
-from .simulation import create_simulation
+from .simulation import create_simulation, simulation_map
 
 app = FastAPI(title="zoniq API", version="0.1.0", description="API planowych analiz dostępności komunikacyjnej.")
 app.add_middleware(
@@ -33,7 +33,20 @@ def data_status() -> dict[str, object]:
 
 @app.post("/api/simulations", response_model=SimulationResponse, status_code=201)
 def post_simulation(request: SimulationRequest) -> SimulationResponse:
-    return create_simulation(request)
+    try:
+        return create_simulation(request, GTFS_DATABASE)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.get("/api/simulations/{simulation_id}/map")
+def get_simulation_map(simulation_id: str) -> dict[str, object]:
+    result = simulation_map(simulation_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Nie znaleziono symulacji.")
+    return result
 
 
 @app.post("/api/journeys", response_model=JourneyResponse)
