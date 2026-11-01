@@ -24,6 +24,8 @@ def prepare_walking_graph(destination: Path, *, north: float, south: float, east
     import osmnx as ox
 
     destination.parent.mkdir(parents=True, exist_ok=True)
+    ox.settings.cache_folder = destination.parent / "http-cache"
+    ox.settings.use_cache = True
     graph = ox.graph_from_bbox((west, south, east, north), network_type="walk", simplify=True)
     graph = ox.project_graph(graph)
     for _, _, _, attributes in graph.edges(keys=True, data=True):
