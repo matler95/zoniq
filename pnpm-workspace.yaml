@@ -1,4 +1,7 @@
 packages:
   - apps/*
+
+# Next.js uses sharp for production image optimization. Keep native build scripts
+# blocked by default and permit only this audited production dependency.
 allowBuilds:
-  sharp: set this to true or false
+  sharp: true
