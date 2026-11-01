@@ -4,7 +4,7 @@ Interaktywna mapa dostępności komunikacyjnej Warszawy i aglomeracji. Użytkown
 
 ## Stan
 
-Pierwszy pionowy wycinek jest gotowy: responsywny interfejs scenariusza, kontrakt API FastAPI oraz deterministyczny silnik demonstracyjny. Wyniki są obecnie oznaczone jako demonstracyjne — do czasu podłączenia i zweryfikowania danych GTFS oraz OSM nie reprezentują rzeczywistych rozkładów.
+Pierwszy pionowy wycinek jest gotowy: responsywny interfejs scenariusza, kontrakt API FastAPI oraz deterministyczny silnik demonstracyjny. Fundament danych zawiera też walidator GTFS z raportem wersji źródła i zakresu kalendarza. Wyniki są nadal oznaczone jako demonstracyjne — do czasu importu i zweryfikowania danych GTFS oraz OSM nie reprezentują rzeczywistych rozkładów.
 
 ## Uruchomienie
 
@@ -24,6 +24,18 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 Frontend: `http://localhost:3000` · API: `http://localhost:8000/docs`.
+
+### Walidacja GTFS
+
+Po pobraniu feedu uruchom walidację przed przetwarzaniem danych:
+
+```bash
+cd apps/api
+python -m app.gtfs ..\..\data\raw\gtfs\ztm\feed.zip --feed-id ztm
+```
+
+Polecenie weryfikuje obowiązkowe tabele i kolumny GTFS, liczy rekordy,
+zapisuje hash SHA-256 oraz zakres kalendarza do `data/processed/metadata/`.
 
 ## Plan MVP
 
