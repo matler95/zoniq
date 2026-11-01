@@ -14,7 +14,8 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
-GTFS_DATABASE = Path(os.getenv("ZONIQ_GTFS_DATABASE", "data/processed/ztm.sqlite"))
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+GTFS_DATABASE = Path(os.getenv("ZONIQ_GTFS_DATABASE", str(PROJECT_ROOT / "data/processed/ztm.sqlite")))
 
 
 @app.get("/health")
