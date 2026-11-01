@@ -224,7 +224,7 @@ def find_reachable_stops(
         for stop in origin_stops:
             board_after = departure_seconds + round(float(stop["walk_minutes"]) * 60)
             rows = connection.execute(
-                f"""SELECT b.stop_id, s.name, s.lat, s.lon, r.short_name,
+                f"""SELECT b.stop_id, s.name, s.lat, s.lon, r.short_name, r.route_type,
                            b.arrival_seconds
                     FROM stop_times a
                     JOIN stop_times b ON b.trip_id = a.trip_id AND b.stop_sequence > a.stop_sequence
@@ -237,7 +237,7 @@ def find_reachable_stops(
                       AND r.route_type IN ({type_slots})""",
                 (stop["id"], board_after, departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
             )
-            for stop_id, name, lat, lon, route, arrival in rows:
+            for stop_id, name, lat, lon, route, route_type, arrival in rows:
                 minutes = round((arrival - departure_seconds) / 60, 1)
                 if minutes < 0 or minutes > max_travel_minutes:
                     continue
@@ -251,6 +251,7 @@ def find_reachable_stops(
                         "travel_minutes": minutes,
                         "arrival_seconds": arrival,
                         "route": route or "bez numeru",
+                        "route_type": route_type,
                         "transfers": 0,
                     }
 
@@ -258,7 +259,7 @@ def find_reachable_stops(
             candidates = sorted(reachable.values(), key=lambda item: int(item["arrival_seconds"]))[:160]
             for transfer in candidates:
                 rows = connection.execute(
-                    f"""SELECT b.stop_id, s.name, s.lat, s.lon, r.short_name, b.arrival_seconds
+                    f"""SELECT b.stop_id, s.name, s.lat, s.lon, r.short_name, r.route_type, b.arrival_seconds
                         FROM stop_times a
                         JOIN stop_times b ON b.trip_id = a.trip_id AND b.stop_sequence > a.stop_sequence
                         JOIN trips t ON t.trip_id = a.trip_id
@@ -270,7 +271,7 @@ def find_reachable_stops(
                           AND r.route_type IN ({type_slots})""",
                     (transfer["stop_id"], int(transfer["arrival_seconds"]) + 120, departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
                 )
-                for stop_id, name, lat, lon, route, arrival in rows:
+                for stop_id, name, lat, lon, route, route_type, arrival in rows:
                     minutes = round((arrival - departure_seconds) / 60, 1)
                     if minutes < 0 or minutes > max_travel_minutes:
                         continue
@@ -284,6 +285,7 @@ def find_reachable_stops(
                             "travel_minutes": minutes,
                             "arrival_seconds": arrival,
                             "route": f"{transfer['route']} → {route or 'bez numeru'}",
+                            "route_type": route_type,
                             "transfers": 1,
                         }
         return [{key: value for key, value in item.items() if key != "arrival_seconds"} for item in sorted(reachable.values(), key=lambda item: float(item["travel_minutes"]))]

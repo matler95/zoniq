@@ -37,6 +37,7 @@ class SimulationResponse(BaseModel):
     map_data_url: str
     reachable_stops: int
     time_bands: dict[str, int]
+    sample_count: int
 
 
 class JourneyRequest(BaseModel):
