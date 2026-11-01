@@ -1,0 +1,13 @@
+node_modules/
+.next/
+*.tsbuildinfo
+.env*
+!.env.example
+__pycache__/
+.venv/
+*.py[cod]
+data/raw/
+data/processed/
+data/simulations/
+data/exports/
+!data/.gitkeep
