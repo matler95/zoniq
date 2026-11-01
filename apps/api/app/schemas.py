@@ -35,3 +35,16 @@ class SimulationResponse(BaseModel):
     data_version: str
     disclaimer: str
     map_data_url: str
+
+
+class JourneyRequest(BaseModel):
+    origin: Coordinates
+    destination: Coordinates
+    journey_date: date
+    departure_time: time
+
+
+class JourneyResponse(BaseModel):
+    data_version: str
+    search_scope: str
+    journeys: list[dict[str, object]]

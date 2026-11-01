@@ -31,11 +31,19 @@ Po pobraniu feedu uruchom walidację przed przetwarzaniem danych:
 
 ```bash
 cd apps/api
-python -m app.gtfs ..\..\data\raw\gtfs\ztm\feed.zip --feed-id ztm
+python -m app.gtfs inspect ..\..\data\raw\gtfs\ztm\feed.zip --feed-id ztm
 ```
 
 Polecenie weryfikuje obowiązkowe tabele i kolumny GTFS, liczy rekordy,
 zapisuje hash SHA-256 oraz zakres kalendarza do `data/processed/metadata/`.
+
+Przygotowanie lokalnego indeksu zapytań dla pierwszych tras bez przesiadek:
+
+```bash
+python -m app.gtfs prepare ..\..\data\raw\gtfs\ztm\feed.zip --feed-id ztm --database ..\..\data\processed\ztm.sqlite
+```
+
+Po przygotowaniu feedu `POST /api/journeys` zwraca pierwsze planowe połączenia bez przesiadki dla pary współrzędnych. API wyraźnie oznacza zakres tego etapu; algorytm wieloprzejściowy jest kolejnym krokiem silnika.
 
 ## Plan MVP
 

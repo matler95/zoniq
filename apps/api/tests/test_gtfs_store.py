@@ -1,0 +1,32 @@
+from datetime import date
+from pathlib import Path
+from zipfile import ZipFile
+
+from app.gtfs import find_direct_journeys, prepare_store
+
+
+def make_direct_feed(path: Path) -> None:
+    rows = {
+        "agency.txt": "agency_name,agency_url,agency_timezone\nZTM,https://ztm.waw.pl,Europe/Warsaw\n",
+        "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\nA,Start,52.200,21.000\nB,End,52.210,21.010\n",
+        "routes.txt": "route_id,route_short_name,route_type\nM1,M1,1\n",
+        "trips.txt": "route_id,service_id,trip_id\nM1,weekday,trip-1\n",
+        "stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\ntrip-1,08:00:00,08:00:00,A,1\ntrip-1,08:10:00,08:10:00,B,2\n",
+        "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\nweekday,1,1,1,1,1,0,0,20261101,20261231\n",
+    }
+    with ZipFile(path, "w") as zip_file:
+        for filename, contents in rows.items():
+            zip_file.writestr(filename, contents)
+
+
+def test_prepared_store_returns_direct_scheduled_journey(tmp_path: Path) -> None:
+    archive = tmp_path / "feed.zip"
+    database = tmp_path / "gtfs.sqlite"
+    make_direct_feed(archive)
+    prepare_store(archive, database, "ztm")
+
+    journeys = find_direct_journeys(database, (52.200, 21.000), (52.210, 21.010), date(2026, 11, 2), 7 * 3600 + 50 * 60)
+
+    assert len(journeys) == 1
+    assert journeys[0]["route"] == "M1"
+    assert journeys[0]["duration_minutes"] == 20.0
