@@ -9,6 +9,8 @@ type Coordinates = { lat: number; lon: number };
 type AccessibilityMapProps = {
   origin: Coordinates;
   destination: Coordinates | null;
+  selectionTarget: "origin" | "destination";
+  onOriginChange: (point: Coordinates) => void;
   onDestinationChange: (point: Coordinates) => void;
 };
 
@@ -25,9 +27,10 @@ const osmStyle: maplibregl.StyleSpecification = {
   layers: [{ id: "osm", type: "raster", source: "osm" }]
 };
 
-export function AccessibilityMap({ origin, destination, onDestinationChange }: AccessibilityMapProps) {
+export function AccessibilityMap({ origin, destination, selectionTarget, onOriginChange, onDestinationChange }: AccessibilityMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
+  const originMarker = useRef<Marker | null>(null);
   const destinationMarker = useRef<Marker | null>(null);
 
   useEffect(() => {
@@ -40,11 +43,26 @@ export function AccessibilityMap({ origin, destination, onDestinationChange }: A
       attributionControl: { compact: true }
     });
     instance.addControl(new maplibregl.NavigationControl(), "bottom-right");
-    new maplibregl.Marker({ color: "#087afe" }).setLngLat([origin.lon, origin.lat]).setPopup(new maplibregl.Popup().setText("Punkt startowy")).addTo(instance);
-    instance.on("click", event => onDestinationChange({ lat: event.lngLat.lat, lon: event.lngLat.lng }));
+    originMarker.current = new maplibregl.Marker({ color: "#087afe" }).setLngLat([origin.lon, origin.lat]).setPopup(new maplibregl.Popup().setText("Punkt startowy")).addTo(instance);
     map.current = instance;
     return () => { instance.remove(); map.current = null; };
-  }, [onDestinationChange, origin.lat, origin.lon]);
+  }, []);
+
+  useEffect(() => {
+    originMarker.current?.setLngLat([origin.lon, origin.lat]);
+  }, [origin]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const selectPoint = (event: maplibregl.MapMouseEvent) => {
+      const point = { lat: event.lngLat.lat, lon: event.lngLat.lng };
+      if (selectionTarget === "origin") onOriginChange(point);
+      else onDestinationChange(point);
+    };
+    instance.on("click", selectPoint);
+    return () => { instance.off("click", selectPoint); };
+  }, [onDestinationChange, onOriginChange, selectionTarget]);
 
   useEffect(() => {
     if (!map.current || !destination) return;

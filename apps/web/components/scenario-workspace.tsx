@@ -13,6 +13,8 @@ function toTime(seconds: number) { return `${String(Math.floor(seconds / 3600) %
 
 export function ScenarioWorkspace() {
   const [originLabel, setOriginLabel] = useState("ul. Puławska 100, Warszawa");
+  const [origin, setOrigin] = useState<Point>(defaultOrigin);
+  const [selectionTarget, setSelectionTarget] = useState<"origin" | "destination">("destination");
   const [limit, setLimit] = useState(60);
   const [selectedModes, setSelectedModes] = useState(modes);
   const [date, setDate] = useState("2026-11-02");
@@ -23,6 +25,7 @@ export function ScenarioWorkspace() {
   const [notice, setNotice] = useState("Kliknij mapę, aby wybrać punkt docelowy.");
   const weekday = useMemo(() => new Intl.DateTimeFormat("pl-PL", { weekday: "long" }).format(new Date(`${date}T12:00:00`)), [date]);
   const onDestinationChange = useCallback((point: Point) => { setDestination(point); setJourneys([]); setNotice(`Cel wybrany: ${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}. Możesz wyszukać trasę.`); }, []);
+  const onOriginChange = useCallback((point: Point) => { setOrigin(point); setJourneys([]); setOriginLabel(`Punkt na mapie: ${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}`); setSelectionTarget("destination"); setNotice("Punkt startowy wybrany. Teraz kliknij punkt docelowy."); }, []);
 
   function toggleMode(mode: string) { setSelectedModes(current => current.includes(mode) ? current.filter(item => item !== mode) : [...current, mode]); }
 
@@ -40,7 +43,7 @@ export function ScenarioWorkspace() {
     if (!destination) { setNotice("Najpierw kliknij punkt docelowy na mapie."); return; }
     setIsLoading(true); setNotice("Szukam planowych połączeń…");
     try {
-      const response = await fetch(`${API_URL}/api/journeys`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ origin: defaultOrigin, destination, journey_date: date, departure_time: time }) });
+      const response = await fetch(`${API_URL}/api/journeys`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ origin, destination, journey_date: date, departure_time: time }) });
       if (!response.ok) throw new Error();
       const result = await response.json(); setJourneys(result.journeys); setNotice(result.journeys.length ? "Pokazuję najbliższe warianty zgodne z rozkładem." : "Brak wariantu bezpośredniego ani z jedną przesiadką w wybranym czasie.");
     } catch { setNotice("Nie mogę połączyć się z przygotowanym indeksem GTFS."); }
@@ -53,13 +56,13 @@ export function ScenarioWorkspace() {
     <section className="workspace">
       <form className="controls panel" onSubmit={simulate}>
         <div><span className="eyebrow">SCENARIUSZ</span><h1>Sprawdź dostępność</h1><p className="muted">Wyszukiwanie obejmuje kursy bezpośrednie i jedną przesiadkę.</p></div>
-        <label>Start<input value={originLabel} onChange={event => setOriginLabel(event.target.value)} aria-label="Punkt początkowy" /></label>
+        <label>Start<input value={originLabel} onChange={event => setOriginLabel(event.target.value)} aria-label="Punkt początkowy" /><button className="route-button" type="button" onClick={() => { setSelectionTarget("origin"); setNotice("Kliknij mapę, aby ustawić punkt startowy."); }}>Wybierz na mapie</button></label>
         <div className="split"><label>Data<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label>Godzina<input type="time" value={time} onChange={event => setTime(event.target.value)} /></label></div><span className="weekday">{weekday}</span>
         <fieldset><legend>Maksymalny czas podróży</legend><div className="pills">{[15, 30, 45, 60, 90, 120].map(value => <button type="button" className={value === limit ? "active" : ""} onClick={() => setLimit(value)} key={value}>{value} min</button>)}</div></fieldset>
         <fieldset><legend>Środki transportu</legend><div className="modes">{modes.map(mode => <label key={mode}><input type="checkbox" checked={selectedModes.includes(mode)} onChange={() => toggleMode(mode)} />{mode}</label>)}</div></fieldset>
         <button className="primary" disabled={isLoading}>{isLoading ? "Obliczam…" : "Utwórz scenariusz"}</button>
       </form>
-      <section className="map panel" aria-label="Interaktywna mapa dostępności"><div className="map-header"><div><span className="eyebrow">MAPA WARSZAWY</span><h2>Kliknij punkt docelowy</h2></div><button type="button" className="route-button" onClick={findJourney} disabled={isLoading || !destination}>Szukaj połączenia</button></div><AccessibilityMap origin={defaultOrigin} destination={destination} onDestinationChange={onDestinationChange} /><p className="notice">{notice}</p></section>
+      <section className="map panel" aria-label="Interaktywna mapa dostępności"><div className="map-header"><div><span className="eyebrow">MAPA WARSZAWY</span><h2>{selectionTarget === "origin" ? "Kliknij punkt startowy" : "Kliknij punkt docelowy"}</h2></div><button type="button" className="route-button" onClick={findJourney} disabled={isLoading || !destination}>Szukaj połączenia</button></div><AccessibilityMap origin={origin} destination={destination} selectionTarget={selectionTarget} onOriginChange={onOriginChange} onDestinationChange={onDestinationChange} /><p className="notice">{notice}</p></section>
       <aside className="details panel"><span className="eyebrow">NAJLEPSZY WARIANT</span><h2>{destination ? "Wybrany punkt" : "Wybierz cel"}</h2>{journey ? <><div className="metric"><strong>{Math.round(journey.duration_minutes)} min</strong><span>kurs planowy</span></div><div className="journey"><h3>Linia {journey.route}</h3><p><b>{toTime(journey.departure_seconds)}</b> odjazd z pobliskiego przystanku</p><p><b>{toTime(journey.arrival_seconds)}</b> przyjazd</p><p><b>{journey.access_walk_minutes.toFixed(0)} + {journey.egress_walk_minutes.toFixed(0)} min</b> dojścia piesze</p></div><dl><div><dt>Przesiadki</dt><dd>{journey.transfers ?? 0}</dd></div><div><dt>Alternatywy</dt><dd>{Math.max(0, journeys.length - 1)}</dd></div><div><dt>Dane</dt><dd>GTFS ZTM</dd></div></dl></> : <p className="muted">Wybierz cel na mapie i uruchom wyszukiwanie. Wynik obejmuje kursy zgodne z datą i godziną, z maksymalnie jedną przesiadką.</p>}<p className="attribution">Dane rozkładowe: ZTM Warszawa, Mikołaj Kuranowski. Mapa © OpenStreetMap contributors.</p></aside>
     </section>
   </main>;
