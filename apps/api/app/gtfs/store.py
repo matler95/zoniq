@@ -63,6 +63,7 @@ def find_direct_journeys(
     journey_date: date,
     departure_seconds: int,
     limit: int = 3,
+    route_types: tuple[int, ...] | None = None,
 ) -> list[dict[str, object]]:
     """Find scheduled journeys without transfers plus walking approaches.
 
@@ -80,8 +81,9 @@ def find_direct_journeys(
         origin_ids = tuple(stop["id"] for stop in origin_stops)
         destination_ids = tuple(stop["id"] for stop in destination_stops)
         active_services = _active_services(connection, journey_date)
-        if not active_services:
+        if not active_services or route_types == ():
             return []
+        route_filter = "" if route_types is None else f" AND r.route_type IN ({','.join('?' for _ in route_types)})"
         query = f"""
             SELECT r.short_name, r.route_type, a.departure_seconds, b.arrival_seconds,
                    a.stop_id, b.stop_id
@@ -93,10 +95,11 @@ def find_direct_journeys(
               AND b.stop_id IN ({','.join('?' for _ in destination_ids)})
               AND a.departure_seconds >= ?
               AND t.service_id IN ({','.join('?' for _ in active_services)})
+              {route_filter}
             ORDER BY a.departure_seconds, b.arrival_seconds
             LIMIT ?
         """
-        values = (*origin_ids, *destination_ids, departure_seconds, *active_services, limit)
+        values = (*origin_ids, *destination_ids, departure_seconds, *active_services, *(route_types or ()), limit)
         results = []
         for route, route_type, depart, arrive, from_stop, to_stop in connection.execute(query, values):
             access = _stop_by_id(origin_stops, from_stop)["walk_minutes"]
@@ -121,6 +124,7 @@ def find_one_transfer_journeys(
     destination: tuple[float, float],
     journey_date: date,
     departure_seconds: int,
+    route_types: tuple[int, ...] | None = None,
     limit: int = 3,
 ) -> list[dict[str, object]]:
     """Find a scheduled journey with at most one same-stop transfer.
@@ -135,18 +139,19 @@ def find_one_transfer_journeys(
         origin_stops = _nearby_stops(connection, *origin)
         destination_stops = _nearby_stops(connection, *destination)
         active_services = _active_services(connection, journey_date)
-        if not origin_stops or not destination_stops or not active_services:
+        if not origin_stops or not destination_stops or not active_services or route_types == ():
             return []
         active_slots = ",".join("?" for _ in active_services)
+        type_filter = "" if route_types is None else f" AND r.route_type IN ({','.join('?' for _ in route_types)})"
         first_boards: list[tuple[str, int, int, float]] = []
         for stop in origin_stops:
             rows = connection.execute(
                 f"""SELECT a.trip_id, a.stop_sequence, a.departure_seconds
-                    FROM stop_times a JOIN trips t ON t.trip_id = a.trip_id
+                    FROM stop_times a JOIN trips t ON t.trip_id = a.trip_id JOIN routes r ON r.route_id = t.route_id
                     WHERE a.stop_id = ? AND a.departure_seconds >= ?
-                      AND a.departure_seconds <= ? AND t.service_id IN ({active_slots})
+                      AND a.departure_seconds <= ? AND t.service_id IN ({active_slots}) {type_filter}
                     ORDER BY a.departure_seconds LIMIT 12""",
-                (stop["id"], departure_seconds, departure_seconds + 5_400, *active_services),
+                (stop["id"], departure_seconds, departure_seconds + 5_400, *active_services, *(route_types or ())),
             )
             first_boards.extend((trip, sequence, depart, float(stop["walk_minutes"])) for trip, sequence, depart in rows)
 
@@ -163,10 +168,10 @@ def find_one_transfer_journeys(
         for transfer_stop, (arrival, first_departure, access, first_trip) in sorted(transfer_arrivals.items(), key=lambda item: item[1][0])[:250]:
             second_boards = connection.execute(
                 f"""SELECT a.trip_id, a.stop_sequence, a.departure_seconds
-                    FROM stop_times a JOIN trips t ON t.trip_id = a.trip_id
-                    WHERE a.stop_id = ? AND a.departure_seconds >= ? AND t.service_id IN ({active_slots})
+                    FROM stop_times a JOIN trips t ON t.trip_id = a.trip_id JOIN routes r ON r.route_id = t.route_id
+                    WHERE a.stop_id = ? AND a.departure_seconds >= ? AND t.service_id IN ({active_slots}) {type_filter}
                     ORDER BY a.departure_seconds LIMIT 4""",
-                (transfer_stop, arrival + 120, *active_services),
+                (transfer_stop, arrival + 120, *active_services, *(route_types or ())),
             )
             for second_trip, second_sequence, second_departure in second_boards:
                 arrival_rows = connection.execute(

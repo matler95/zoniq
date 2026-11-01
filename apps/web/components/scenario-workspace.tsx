@@ -9,6 +9,9 @@ const defaultOrigin = { lat: 52.196, lon: 21.022 };
 type Point = { lat: number; lon: number };
 type Simulation = { simulation_id: string; map_data_url: string; reachable_stops: number; disclaimer: string; data_version: string };
 type GeocodeResult = { label: string; lat: number; lon: number };
+type Journey = { route: string; duration_minutes: number; access_walk_minutes: number; egress_walk_minutes: number; departure_seconds: number; arrival_seconds: number; transfers?: number };
+
+function toTime(seconds: number) { return `${String(Math.floor(seconds / 3600) % 24).padStart(2, "0")}:${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}`; }
 
 export function ScenarioWorkspace() {
   const [originLabel, setOriginLabel] = useState("ul. Puławska 100, Warszawa");
@@ -23,6 +26,8 @@ export function ScenarioWorkspace() {
   const [mapData, setMapData] = useState<ReachabilityMap | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
   const [geocodeResults, setGeocodeResults] = useState<GeocodeResult[]>([]);
+  const [destination, setDestination] = useState<Point | null>(null);
+  const [journeys, setJourneys] = useState<Journey[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [notice, setNotice] = useState("Ustaw punkt startowy, parametry i wygeneruj mapę zasięgu.");
   const weekday = useMemo(() => new Intl.DateTimeFormat("pl-PL", { weekday: "long" }).format(new Date(`${date}T12:00:00`)), [date]);
@@ -46,6 +51,17 @@ export function ScenarioWorkspace() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "Nie mogę połączyć się z usługą adresową."); }
   }
 
+  const onDestinationChange = useCallback(async (point: Point) => {
+    if (!simulation) return;
+    setDestination(point); setJourneys([]); setNotice("Sprawdzam dokładne połączenie do wybranego punktu…");
+    try {
+      const response = await fetch(`${API_URL}/api/journeys`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ origin, destination: point, journey_date: date, departure_time: time, max_transfers: maxTransfers, transport_modes: selectedModes.map(mode => ({ "pieszo": "walk", "autobus": "bus", "tramwaj": "tram", "metro": "metro", SKM: "skm", KM: "km", WKD: "wkd" })[mode]) }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail ?? "Nie udało się wyznaczyć trasy.");
+      setJourneys(result.journeys); setNotice(result.journeys.length ? "Pokazuję najlepszy wariant do wybranego punktu." : "W tym zakresie nie znaleziono wariantu zgodnego z filtrami.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Nie udało się sprawdzić punktu."); }
+  }, [date, maxTransfers, origin, selectedModes, simulation, time]);
+
   async function simulate(event: FormEvent) {
     event.preventDefault();
     if (!selectedModes.some(mode => mode !== "pieszo")) { setNotice("Wybierz co najmniej jeden środek transportu."); return; }
@@ -59,7 +75,7 @@ export function ScenarioWorkspace() {
       if (!response.ok) throw new Error(result.detail ?? "Nie udało się utworzyć symulacji.");
       const mapResponse = await fetch(`${API_URL}${result.map_data_url}`);
       if (!mapResponse.ok) throw new Error("Nie udało się pobrać warstwy mapy.");
-      setMapData(await mapResponse.json()); setSimulation(result);
+      setMapData(await mapResponse.json()); setSimulation(result); setDestination(null); setJourneys([]);
       setNotice(`Pokazuję ${result.reachable_stops} osiągalnych przystanków w limicie ${limit} min.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : "Nie mogę połączyć się z API."); }
     finally { setIsLoading(false); }
@@ -77,8 +93,8 @@ export function ScenarioWorkspace() {
         <fieldset><legend>Środki transportu</legend><div className="modes">{modes.map(mode => <label key={mode}><input type="checkbox" checked={selectedModes.includes(mode)} onChange={() => toggleMode(mode)} />{mode}</label>)}</div></fieldset>
         <button className="primary" disabled={isLoading}>{isLoading ? "Obliczam…" : "Generuj mapę zasięgu"}</button>
       </form>
-      <section className="map panel" aria-label="Interaktywna mapa dostępności"><div className="map-header"><div><span className="eyebrow">MAPA WARSZAWY</span><h2>{isChoosingOrigin ? "Kliknij punkt startowy" : "Zasięg komunikacyjny"}</h2></div><div className="legend"><span><i className="band-15" />do 15 min</span><span><i className="band-30" />do 30 min</span><span><i className="band-45" />do 45 min</span><span><i className="band-60" />do {limit} min</span></div></div><AccessibilityMap origin={origin} reachability={mapData} selectingOrigin={isChoosingOrigin} onOriginChange={onOriginChange} /><p className="notice">{notice}</p></section>
-      <aside className="details panel"><span className="eyebrow">WYNIK SCENARIUSZA</span><h2>{simulation ? `${limit} minut od startu` : "Czeka na symulację"}</h2>{simulation ? <><div className="metric"><strong>{simulation.reachable_stops}</strong><span>osiągalnych przystanków</span></div><p className="muted">Kolor punktu oznacza najszybszy planowy czas dotarcia, wraz z oczekiwaniem i dojściem do pierwszego przystanku.</p><dl><div><dt>Start</dt><dd>{origin.lat.toFixed(3)}, {origin.lon.toFixed(3)}</dd></div><div><dt>Wersja danych</dt><dd>{simulation.data_version}</dd></div><div><dt>Limit</dt><dd>{limit} min</dd></div></dl><p className="muted">{simulation.disclaimer}</p></> : <p className="muted">Ta mapa odpowie najpierw na pytanie „dokąd dojadę?”. Szczegóły konkretnego celu będą kolejną warstwą po kliknięciu wyniku.</p>}<p className="attribution">Dane rozkładowe: ZTM Warszawa, Mikołaj Kuranowski. Mapa © OpenStreetMap contributors.</p></aside>
+      <section className="map panel" aria-label="Interaktywna mapa dostępności"><div className="map-header"><div><span className="eyebrow">MAPA WARSZAWY</span><h2>{isChoosingOrigin ? "Kliknij punkt startowy" : simulation ? "Kliknij cel, aby sprawdzić trasę" : "Zasięg komunikacyjny"}</h2></div><div className="legend"><span><i className="band-15" />do 15 min</span><span><i className="band-30" />do 30 min</span><span><i className="band-45" />do 45 min</span><span><i className="band-60" />do {limit} min</span></div></div><AccessibilityMap origin={origin} reachability={mapData} selectingOrigin={isChoosingOrigin} canSelectDestination={Boolean(simulation)} onOriginChange={onOriginChange} onDestinationChange={onDestinationChange} /><p className="notice">{notice}</p></section>
+      <aside className="details panel"><span className="eyebrow">{destination ? "WYBRANY CEL" : "WYNIK SCENARIUSZA"}</span><h2>{destination ? "Szczegóły podróży" : simulation ? `${limit} minut od startu` : "Czeka na symulację"}</h2>{journeys[0] ? <><div className="metric"><strong>{Math.round(journeys[0].duration_minutes)} min</strong><span>planowo do wskazanego punktu</span></div><div className="journey"><h3>Linia {journeys[0].route}</h3><p><b>{toTime(journeys[0].departure_seconds)}</b> odjazd</p><p><b>{toTime(journeys[0].arrival_seconds)}</b> przyjazd</p><p><b>{journeys[0].access_walk_minutes.toFixed(0)} + {journeys[0].egress_walk_minutes.toFixed(0)} min</b> dojścia piesze</p></div><dl><div><dt>Przesiadki</dt><dd>{journeys[0].transfers ?? 0}</dd></div><div><dt>Alternatywy</dt><dd>{Math.max(0, journeys.length - 1)}</dd></div></dl></> : simulation ? <><div className="metric"><strong>{simulation.reachable_stops}</strong><span>osiągalnych przystanków</span></div><p className="muted">Kliknij dowolny punkt mapy, aby sprawdzić najbliższą trasę.</p><dl><div><dt>Wersja danych</dt><dd>{simulation.data_version}</dd></div><div><dt>Limit</dt><dd>{limit} min</dd></div></dl><p className="muted">{simulation.disclaimer}</p></> : <p className="muted">Ta mapa odpowie najpierw na pytanie „dokąd dojadę?”. Szczegóły konkretnego celu pojawią się po kliknięciu mapy.</p>}<p className="attribution">Dane rozkładowe: ZTM Warszawa, Mikołaj Kuranowski. Mapa © OpenStreetMap contributors.</p></aside>
     </section>
   </main>;
 }

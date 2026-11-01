@@ -17,6 +17,7 @@ app.add_middleware(
 )
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 GTFS_DATABASE = Path(os.getenv("ZONIQ_GTFS_DATABASE", str(PROJECT_ROOT / "data/processed/ztm.sqlite")))
+_MODE_ROUTE_TYPES = {"bus": 3, "tram": 0, "metro": 1, "skm": 2, "km": 2, "wkd": 2}
 
 
 @app.get("/health")
@@ -62,20 +63,16 @@ def get_simulation_map(simulation_id: str) -> dict[str, object]:
 def post_journey(request: JourneyRequest) -> JourneyResponse:
     report = latest_report(GTFS_DATABASE)
     departure_seconds = request.departure_time.hour * 3600 + request.departure_time.minute * 60 + request.departure_time.second
+    route_types = tuple(sorted({_MODE_ROUTE_TYPES[mode.value] for mode in request.transport_modes if mode.value in _MODE_ROUTE_TYPES}))
     direct = find_direct_journeys(
         GTFS_DATABASE,
         (request.origin.lat, request.origin.lon),
         (request.destination.lat, request.destination.lon),
         request.journey_date,
         departure_seconds,
+        route_types=route_types,
     )
-    with_transfer = find_one_transfer_journeys(
-        GTFS_DATABASE,
-        (request.origin.lat, request.origin.lon),
-        (request.destination.lat, request.destination.lon),
-        request.journey_date,
-        departure_seconds,
-    )
+    with_transfer = find_one_transfer_journeys(GTFS_DATABASE, (request.origin.lat, request.origin.lon), (request.destination.lat, request.destination.lon), request.journey_date, departure_seconds, route_types) if request.max_transfers else []
     journeys = sorted([*direct, *with_transfer], key=lambda journey: float(journey["duration_minutes"]))[:3]
     return JourneyResponse(
         data_version=report.sha256[:12] if report else "unprepared",

@@ -14,7 +14,9 @@ type AccessibilityMapProps = {
   origin: Coordinates;
   reachability: ReachabilityMap | null;
   selectingOrigin: boolean;
+  canSelectDestination: boolean;
   onOriginChange: (point: Coordinates) => void;
+  onDestinationChange: (point: Coordinates) => void;
 };
 
 const osmStyle: maplibregl.StyleSpecification = {
@@ -23,7 +25,7 @@ const osmStyle: maplibregl.StyleSpecification = {
   layers: [{ id: "osm", type: "raster", source: "osm" }]
 };
 
-export function AccessibilityMap({ origin, reachability, selectingOrigin, onOriginChange }: AccessibilityMapProps) {
+export function AccessibilityMap({ origin, reachability, selectingOrigin, canSelectDestination, onOriginChange, onDestinationChange }: AccessibilityMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const originMarker = useRef<Marker | null>(null);
@@ -56,11 +58,14 @@ export function AccessibilityMap({ origin, reachability, selectingOrigin, onOrig
 
   useEffect(() => {
     const instance = map.current;
-    if (!instance || !selectingOrigin) return;
-    const selectPoint = (event: maplibregl.MapMouseEvent) => onOriginChange({ lat: event.lngLat.lat, lon: event.lngLat.lng });
+    if (!instance || (!selectingOrigin && !canSelectDestination)) return;
+    const selectPoint = (event: maplibregl.MapMouseEvent) => {
+      const point = { lat: event.lngLat.lat, lon: event.lngLat.lng };
+      if (selectingOrigin) onOriginChange(point); else onDestinationChange(point);
+    };
     instance.on("click", selectPoint);
     return () => { instance.off("click", selectPoint); };
-  }, [onOriginChange, selectingOrigin]);
+  }, [canSelectDestination, onDestinationChange, onOriginChange, selectingOrigin]);
 
   useEffect(() => {
     const instance = map.current;

@@ -43,6 +43,8 @@ class JourneyRequest(BaseModel):
     destination: Coordinates
     journey_date: date
     departure_time: time
+    max_transfers: int = Field(default=1, ge=0, le=1)
+    transport_modes: list[TransportMode] = list(TransportMode)
 
 
 class JourneyResponse(BaseModel):
