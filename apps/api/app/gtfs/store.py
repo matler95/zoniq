@@ -20,22 +20,27 @@ EARTH_RADIUS_METERS = 6_371_000
 def prepare_store(archive: Path, database: Path, feed_id: str) -> FeedReport:
     """Build a queryable local store from a validated GTFS archive.
 
-    The raw archive remains immutable. Re-running this function atomically
-    replaces only the prepared SQLite cache for the named feed.
+    The raw archive remains immutable. Import stages are committed so a long
+    production import is observable and a stopped import can safely restart.
     """
     report = inspect_feed(archive, feed_id)
     database.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database)
     try:
         connection.executescript(_SCHEMA)
+        connection.executescript(_DROP_INDEXES)
         connection.executescript("DELETE FROM metadata; DELETE FROM stops; DELETE FROM routes; DELETE FROM trips; DELETE FROM stop_times; DELETE FROM calendar; DELETE FROM service_dates;")
+        connection.commit()
         with ZipFile(archive) as zip_file:
             _load_stops(connection, zip_file, feed_id)
             _load_routes(connection, zip_file, feed_id)
             _load_trips(connection, zip_file, feed_id)
-            _load_stop_times(connection, zip_file, feed_id)
             _load_calendar(connection, zip_file, feed_id)
             _load_calendar_dates(connection, zip_file, feed_id)
+            connection.commit()
+            _load_stop_times(connection, zip_file, feed_id)
+            connection.commit()
+        connection.executescript(_INDEXES)
         connection.execute("INSERT INTO metadata(key, value) VALUES (?, ?)", ("feed_report", json.dumps(report.as_dict())))
         connection.commit()
     finally:
@@ -290,6 +295,14 @@ CREATE TABLE IF NOT EXISTS trips (trip_id TEXT PRIMARY KEY, route_id TEXT NOT NU
 CREATE TABLE IF NOT EXISTS stop_times (trip_id TEXT NOT NULL, stop_id TEXT NOT NULL, arrival_seconds INTEGER NOT NULL, departure_seconds INTEGER NOT NULL, stop_sequence INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS calendar (service_id TEXT PRIMARY KEY, monday INTEGER, tuesday INTEGER, wednesday INTEGER, thursday INTEGER, friday INTEGER, saturday INTEGER, sunday INTEGER, start_date TEXT, end_date TEXT);
 CREATE TABLE IF NOT EXISTS service_dates (service_id TEXT NOT NULL, date TEXT NOT NULL, exception_type INTEGER NOT NULL, PRIMARY KEY(service_id, date));
+"""
+_DROP_INDEXES = """
+DROP INDEX IF EXISTS stop_times_departure;
+DROP INDEX IF EXISTS stop_times_trip;
+DROP INDEX IF EXISTS trips_service;
+DROP INDEX IF EXISTS service_dates_date;
+"""
+_INDEXES = """
 CREATE INDEX IF NOT EXISTS stop_times_departure ON stop_times(stop_id, departure_seconds, trip_id, stop_sequence);
 CREATE INDEX IF NOT EXISTS stop_times_trip ON stop_times(trip_id, stop_sequence);
 CREATE INDEX IF NOT EXISTS trips_service ON trips(service_id);
