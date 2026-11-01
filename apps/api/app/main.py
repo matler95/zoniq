@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .gtfs import find_direct_journeys, latest_report
+from .gtfs import find_direct_journeys, find_one_transfer_journeys, latest_report
 from .schemas import JourneyRequest, JourneyResponse, SimulationRequest, SimulationResponse
 from .simulation import create_simulation
 
@@ -40,15 +40,23 @@ def post_simulation(request: SimulationRequest) -> SimulationResponse:
 def post_journey(request: JourneyRequest) -> JourneyResponse:
     report = latest_report(GTFS_DATABASE)
     departure_seconds = request.departure_time.hour * 3600 + request.departure_time.minute * 60 + request.departure_time.second
-    journeys = find_direct_journeys(
+    direct = find_direct_journeys(
         GTFS_DATABASE,
         (request.origin.lat, request.origin.lon),
         (request.destination.lat, request.destination.lon),
         request.journey_date,
         departure_seconds,
     )
+    with_transfer = find_one_transfer_journeys(
+        GTFS_DATABASE,
+        (request.origin.lat, request.origin.lon),
+        (request.destination.lat, request.destination.lon),
+        request.journey_date,
+        departure_seconds,
+    )
+    journeys = sorted([*direct, *with_transfer], key=lambda journey: float(journey["duration_minutes"]))[:3]
     return JourneyResponse(
         data_version=report.sha256[:12] if report else "unprepared",
-        search_scope="direct scheduled trips with walking access; transfers are not included yet",
+        search_scope="scheduled trips with walking access and at most one same-stop transfer",
         journeys=journeys,
     )
