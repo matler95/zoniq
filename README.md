@@ -1,10 +1,10 @@
 # zoniq
 
-Interaktywna mapa dostępności komunikacyjnej Warszawy i aglomeracji. Użytkownik wybiera punkt startowy, datę oraz godzinę, a aplikacja pokazuje zasięg i szczegóły podróży według rozkładów GTFS.
+Interaktywna mapa dostępności komunikacyjnej Warszawy i aglomeracji. Użytkownik wybiera punkt startowy, datę oraz godzinę, a aplikacja pokazuje, dokąd można dotrzeć w zadanym czasie według rozkładów GTFS. Szczegóły pojedynczej trasy są funkcją pomocniczą mapy.
 
 ## Stan
 
-Pierwszy pionowy wycinek jest gotowy: responsywny interfejs scenariusza, kontrakt API FastAPI oraz deterministyczny silnik demonstracyjny. Fundament danych zawiera też walidator GTFS z raportem wersji źródła i zakresu kalendarza. Wyniki są nadal oznaczone jako demonstracyjne — do czasu importu i zweryfikowania danych GTFS oraz OSM nie reprezentują rzeczywistych rozkładów.
+Pierwszy pionowy wycinek jest gotowy: responsywny interfejs scenariusza, FastAPI i lokalny indeks rozkładów GTFS. Aktualna mapa pokazuje osiągalne przystanki i podstawowe szczegóły trasy; nie jest jeszcze końcową powierzchnią zasięgu. Docelowy silnik doda graf pieszy OSM, RAPTOR do dwóch przesiadek oraz uśrednianie wyników startów co minutę w oknie analizy.
 
 ## Uruchomienie
 
