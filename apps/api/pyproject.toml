@@ -5,6 +5,8 @@ description = "API analiz dostępności transportowej zoniq"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115,<1",
+  "networkx>=3.4,<4",
+  "osmnx>=2.0,<3",
   "uvicorn[standard]>=0.34,<1"
 ]
 

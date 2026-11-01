@@ -43,6 +43,16 @@ Przygotowanie lokalnego indeksu zapytań dla pierwszych tras bez przesiadek:
 python -m app.gtfs prepare ..\..\data\raw\gtfs\ztm\feed.zip --feed-id ztm --database ..\..\data\processed\ztm.sqlite
 ```
 
+### Graf pieszy OSM
+
+Graf pobiera się jednorazowo i pozostaje lokalnym artefaktem danych:
+
+```bash
+python -m app.walking ..\..\data\processed\walking\warsaw.graphml --north 52.38 --south 52.05 --east 21.36 --west 20.76
+```
+
+Krawędzie chodnikowe mają wagę czasu marszu; schody liczą się podwójnie.
+
 Po przygotowaniu feedu `POST /api/journeys` zwraca pierwsze planowe połączenia bez przesiadki dla pary współrzędnych. API wyraźnie oznacza zakres tego etapu; algorytm wieloprzejściowy jest kolejnym krokiem silnika.
 
 ## Plan MVP
