@@ -41,7 +41,7 @@ def test_prepared_store_finds_one_transfer_from_calendar_dates(tmp_path: Path) -
     database = tmp_path / "gtfs.sqlite"
     rows = {
         "agency.txt": "agency_name,agency_url,agency_timezone\nZTM,https://ztm.waw.pl,Europe/Warsaw\n",
-        "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\nA,Start,52.200,21.000\nX,Change,52.205,21.005\nB,End,52.210,21.010\n",
+        "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\nA,Start,52.200,21.000\nX,Change,52.212,21.012\nB,End,52.222,21.022\n",
         "routes.txt": "route_id,route_short_name,route_type\nR1,1,3\nR2,2,3\n",
         "trips.txt": "route_id,service_id,trip_id\nR1,special,first\nR2,special,second\n",
         "stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nfirst,08:00:00,08:00:00,A,1\nfirst,08:08:00,08:08:00,X,2\nsecond,08:12:00,08:12:00,X,1\nsecond,08:22:00,08:22:00,B,2\n",
@@ -52,7 +52,10 @@ def test_prepared_store_finds_one_transfer_from_calendar_dates(tmp_path: Path) -
             zip_file.writestr(filename, contents)
     prepare_store(archive, database, "ztm")
 
-    journeys = find_one_transfer_journeys(database, (52.200, 21.000), (52.210, 21.010), date(2026, 11, 2), 7 * 3600 + 50 * 60)
+    journeys = find_one_transfer_journeys(database, (52.200, 21.000), (52.222, 21.022), date(2026, 11, 2), 7 * 3600 + 50 * 60)
 
     assert journeys[0]["route"] == "1 → 2"
     assert journeys[0]["transfers"] == 1
+
+    reachable = find_reachable_stops(database, (52.200, 21.000), date(2026, 11, 2), 7 * 3600 + 50 * 60, 40, (3,), max_transfers=1)
+    assert any(stop["stop_id"] == "ztm:B" and stop["transfers"] == 1 for stop in reachable)

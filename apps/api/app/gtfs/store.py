@@ -199,11 +199,12 @@ def find_reachable_stops(
     departure_seconds: int,
     max_travel_minutes: int,
     route_types: tuple[int, ...],
+    max_transfers: int = 0,
 ) -> list[dict[str, object]]:
     """Return scheduled, directly reachable stops for an accessibility map.
 
     Each feature includes waiting time and the walk needed to reach its first
-    stop. A later RAPTOR round will extend this function with transfers.
+    stop. One same-stop transfer is supported as the first RAPTOR-like round.
     """
     if not database.is_file() or not route_types:
         return []
@@ -243,9 +244,44 @@ def find_reachable_stops(
                         "lat": lat,
                         "lon": lon,
                         "travel_minutes": minutes,
+                        "arrival_seconds": arrival,
                         "route": route or "bez numeru",
+                        "transfers": 0,
                     }
-        return sorted(reachable.values(), key=lambda item: float(item["travel_minutes"]))
+
+        if max_transfers > 0:
+            candidates = sorted(reachable.values(), key=lambda item: int(item["arrival_seconds"]))[:160]
+            for transfer in candidates:
+                rows = connection.execute(
+                    f"""SELECT b.stop_id, s.name, s.lat, s.lon, r.short_name, b.arrival_seconds
+                        FROM stop_times a
+                        JOIN stop_times b ON b.trip_id = a.trip_id AND b.stop_sequence > a.stop_sequence
+                        JOIN trips t ON t.trip_id = a.trip_id
+                        JOIN routes r ON r.route_id = t.route_id
+                        JOIN stops s ON s.stop_id = b.stop_id
+                        WHERE a.stop_id = ? AND a.departure_seconds >= ?
+                          AND a.departure_seconds <= ?
+                          AND t.service_id IN ({service_slots})
+                          AND r.route_type IN ({type_slots})""",
+                    (transfer["stop_id"], int(transfer["arrival_seconds"]) + 120, departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
+                )
+                for stop_id, name, lat, lon, route, arrival in rows:
+                    minutes = round((arrival - departure_seconds) / 60, 1)
+                    if minutes < 0 or minutes > max_travel_minutes:
+                        continue
+                    existing = reachable.get(stop_id)
+                    if existing is None or minutes < float(existing["travel_minutes"]):
+                        reachable[stop_id] = {
+                            "stop_id": stop_id,
+                            "name": name,
+                            "lat": lat,
+                            "lon": lon,
+                            "travel_minutes": minutes,
+                            "arrival_seconds": arrival,
+                            "route": f"{transfer['route']} → {route or 'bez numeru'}",
+                            "transfers": 1,
+                        }
+        return [{key: value for key, value in item.items() if key != "arrival_seconds"} for item in sorted(reachable.values(), key=lambda item: float(item["travel_minutes"]))]
 
 
 def parse_gtfs_time(value: str) -> int:

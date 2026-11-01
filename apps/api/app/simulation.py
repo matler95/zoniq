@@ -33,6 +33,7 @@ def create_simulation(request: SimulationRequest, database: Path) -> SimulationR
         departure_seconds,
         request.max_travel_time_minutes,
         route_types,
+        request.max_transfers,
     )
     features = [{
         "type": "Feature",
@@ -48,7 +49,7 @@ def create_simulation(request: SimulationRequest, database: Path) -> SimulationR
         simulation_id=simulation_id,
         status="completed",
         data_version=report.sha256[:12],
-        disclaimer="Pierwsza warstwa pokazuje bezpośrednio osiągalne przystanki według rozkładu. Izochrony, dojścia po OSM i przesiadki będą liczone w kolejnej rundzie silnika.",
+        disclaimer="Warstwa pokazuje planowo osiągalne przystanki. Obsługuje kursy bezpośrednie i jedną przesiadkę na tym samym przystanku; izochrony i dojścia po sieci OSM są kolejnym etapem.",
         map_data_url=f"/api/simulations/{simulation_id}/map",
         reachable_stops=len(features),
     )

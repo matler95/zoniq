@@ -18,6 +18,7 @@ export function ScenarioWorkspace() {
   const [selectedModes, setSelectedModes] = useState(modes);
   const [date, setDate] = useState("2026-11-02");
   const [time, setTime] = useState("08:00");
+  const [maxTransfers, setMaxTransfers] = useState(1);
   const [isChoosingOrigin, setIsChoosingOrigin] = useState(false);
   const [mapData, setMapData] = useState<ReachabilityMap | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
@@ -52,7 +53,7 @@ export function ScenarioWorkspace() {
     try {
       const response = await fetch(`${API_URL}/api/simulations`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ origin, origin_label: originLabel, journey_date: date, departure_time: time, max_travel_time_minutes: limit, transport_modes: selectedModes.map(mode => ({ "pieszo": "walk", "autobus": "bus", "tramwaj": "tram", "metro": "metro", SKM: "skm", KM: "km", WKD: "wkd" })[mode]) })
+        body: JSON.stringify({ origin, origin_label: originLabel, journey_date: date, departure_time: time, max_travel_time_minutes: limit, max_transfers: maxTransfers, transport_modes: selectedModes.map(mode => ({ "pieszo": "walk", "autobus": "bus", "tramwaj": "tram", "metro": "metro", SKM: "skm", KM: "km", WKD: "wkd" })[mode]) })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail ?? "Nie udało się utworzyć symulacji.");
@@ -72,6 +73,7 @@ export function ScenarioWorkspace() {
         <label>Start<input value={originLabel} onChange={event => { setOriginLabel(event.target.value); setGeocodeResults([]); }} aria-label="Punkt początkowy" /><div className="address-actions"><button className="route-button" type="button" onClick={searchOrigin}>Znajdź adres</button><button className="route-button" type="button" onClick={() => { setIsChoosingOrigin(true); setNotice("Kliknij mapę, aby ustawić punkt startowy."); }}>Wybierz na mapie</button></div></label>{geocodeResults.length > 0 && <ul className="address-results">{geocodeResults.map(result => <li key={`${result.lat}:${result.lon}`}><button type="button" onClick={() => onOriginChange(result)}>{result.label}</button></li>)}</ul>}
         <div className="split"><label>Data<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label>Godzina<input type="time" value={time} onChange={event => setTime(event.target.value)} /></label></div><span className="weekday">{weekday}</span>
         <fieldset><legend>Limit podróży</legend><div className="pills">{[15, 30, 45, 60].map(value => <button type="button" className={value === limit && !customLimit ? "active" : ""} onClick={() => setPreset(value)} key={value}>{value} min</button>)}</div><label className="custom-limit">Własny limit (5–180 min)<input inputMode="numeric" value={customLimit} placeholder="np. 75" onChange={event => setCustom(event.target.value)} /></label></fieldset>
+        <label>Przesiadki<select value={maxTransfers} onChange={event => setMaxTransfers(Number(event.target.value))}><option value={0}>bez przesiadek</option><option value={1}>maksymalnie 1</option></select></label>
         <fieldset><legend>Środki transportu</legend><div className="modes">{modes.map(mode => <label key={mode}><input type="checkbox" checked={selectedModes.includes(mode)} onChange={() => toggleMode(mode)} />{mode}</label>)}</div></fieldset>
         <button className="primary" disabled={isLoading}>{isLoading ? "Obliczam…" : "Generuj mapę zasięgu"}</button>
       </form>
