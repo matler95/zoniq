@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .geocoding import search_address
+from .geocoding import reverse_address, search_address
 from .gtfs import find_direct_journeys, find_one_transfer_journeys, latest_report
 from .schemas import JourneyRequest, JourneyResponse, SimulationRequest, SimulationResponse
 from .simulation import create_simulation, simulation_map
@@ -39,6 +39,14 @@ def get_geocode(q: str) -> dict[str, object]:
         return {"results": search_address(q)}
     except OSError as error:
         raise HTTPException(status_code=503, detail="Usługa wyszukiwania adresów jest chwilowo niedostępna.") from error
+
+
+@app.get("/api/reverse-geocode")
+def get_reverse_geocode(lat: float, lon: float) -> dict[str, object]:
+    try:
+        return {"label": reverse_address(lat, lon)}
+    except OSError as error:
+        raise HTTPException(status_code=503, detail="Usługa adresowa jest chwilowo niedostępna.") from error
 
 
 @app.post("/api/simulations", response_model=SimulationResponse, status_code=201)

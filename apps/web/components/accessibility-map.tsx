@@ -12,6 +12,7 @@ export type ReachabilityMap = {
 
 type AccessibilityMapProps = {
   origin: Coordinates;
+  destination: Coordinates | null;
   reachability: ReachabilityMap | null;
   selectingOrigin: boolean;
   canSelectDestination: boolean;
@@ -25,10 +26,11 @@ const osmStyle: maplibregl.StyleSpecification = {
   layers: [{ id: "osm", type: "raster", source: "osm" }]
 };
 
-export function AccessibilityMap({ origin, reachability, selectingOrigin, canSelectDestination, onOriginChange, onDestinationChange }: AccessibilityMapProps) {
+export function AccessibilityMap({ origin, destination, reachability, selectingOrigin, canSelectDestination, onOriginChange, onDestinationChange }: AccessibilityMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const originMarker = useRef<Marker | null>(null);
+  const destinationMarker = useRef<Marker | null>(null);
 
   useEffect(() => {
     if (!container.current || map.current) return;
@@ -55,6 +57,12 @@ export function AccessibilityMap({ origin, reachability, selectingOrigin, canSel
   }, []);
 
   useEffect(() => { originMarker.current?.setLngLat([origin.lon, origin.lat]); }, [origin]);
+
+  useEffect(() => {
+    if (!map.current || !destination) return;
+    destinationMarker.current?.remove();
+    destinationMarker.current = new maplibregl.Marker({ color: "#f15246" }).setLngLat([destination.lon, destination.lat]).setPopup(new maplibregl.Popup().setText("Wybrany cel")).addTo(map.current);
+  }, [destination]);
 
   useEffect(() => {
     const instance = map.current;

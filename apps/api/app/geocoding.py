@@ -41,6 +41,28 @@ def search_address(query: str) -> list[dict[str, object]]:
         return results
 
 
+def reverse_address(lat: float, lon: float) -> str | None:
+    """Resolve a user-clicked map point to an address with the same rate limit."""
+    key = f"reverse:{lat:.5f}:{lon:.5f}"
+    if key in _CACHE:
+        return str(_CACHE[key][0]["label"]) if _CACHE[key] else None
+    global _LAST_REQUEST
+    with _LOCK:
+        if key in _CACHE:
+            return str(_CACHE[key][0]["label"]) if _CACHE[key] else None
+        delay = _MIN_INTERVAL_SECONDS - (time.monotonic() - _LAST_REQUEST)
+        if delay > 0:
+            time.sleep(delay)
+        params = urlencode({"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 18})
+        request = Request(f"https://nominatim.openstreetmap.org/reverse?{params}", headers={"User-Agent": _USER_AGENT, "Accept-Language": "pl"})
+        with urlopen(request, timeout=6) as response:  # nosec B310: fixed HTTPS host
+            payload = json.load(response)
+        _LAST_REQUEST = time.monotonic()
+        label = str(payload["display_name"]) if "display_name" in payload else None
+        _CACHE[key] = [{"label": label}] if label else []
+        return label
+
+
 def parse_results(payload: list[dict[str, object]]) -> list[dict[str, object]]:
     return [
         {"label": str(item["display_name"]), "lat": float(item["lat"]), "lon": float(item["lon"])}
