@@ -5,7 +5,8 @@ param(
   [double] $South = 52.05,
   [double] $East = 21.36,
   [double] $West = 20.76,
-  [int] $Grid = 4
+  [int] $Grid = 4,
+  [switch] $Merge
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +35,8 @@ for ($column = 0; $column -lt $Grid; $column++) {
   }
 }
 
-Write-Output 'Merging walking tiles'
-& $python -u -m app.walking $Destination --merge $tilePaths
-if ($LASTEXITCODE -ne 0) { throw "Walking graph merge failed with exit code $LASTEXITCODE" }
+if ($Merge) {
+  Write-Output 'Merging walking tiles'
+  & $python -u -m app.walking $Destination --merge $tilePaths
+  if ($LASTEXITCODE -ne 0) { throw "Walking graph merge failed with exit code $LASTEXITCODE" }
+}

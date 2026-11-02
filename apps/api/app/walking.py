@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import networkx as nx
@@ -126,22 +127,35 @@ def merge_walking_graphs(sources: list[Path], destination: Path) -> WalkingGraph
     return report
 
 
+@lru_cache(maxsize=4)
+def _load_walking_graph(graph_path: str) -> nx.MultiDiGraph:
+    import osmnx as ox
+
+    graph = ox.load_graphml(graph_path)
+    for _, _, _, attributes in graph.edges(keys=True, data=True):
+        attributes["walk_seconds"] = float(attributes["walk_seconds"])
+    return graph
+
+
 def walking_minutes_to_points(graph_path: Path, origin: tuple[float, float], targets: dict[str, tuple[float, float]], max_minutes: int) -> dict[str, float]:
     """Compute network walking time from one WGS84 point to named WGS84 targets."""
     import osmnx as ox
     from pyproj import Transformer
 
-    graph = ox.load_graphml(graph_path)
+    if not targets:
+        return {}
+    graph = _load_walking_graph(str(graph_path.resolve()))
     crs = graph.graph.get("crs", "EPSG:4326")
     transform = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
     origin_x, origin_y = transform.transform(origin[1], origin[0])
     origin_node = ox.distance.nearest_nodes(graph, origin_x, origin_y)
     cutoff_seconds = max_minutes * 60
     lengths = nx.single_source_dijkstra_path_length(graph, origin_node, cutoff=cutoff_seconds, weight="walk_seconds")
+    identifiers = list(targets)
+    coordinates = [transform.transform(targets[identifier][1], targets[identifier][0]) for identifier in identifiers]
+    target_nodes = ox.distance.nearest_nodes(graph, X=[point[0] for point in coordinates], Y=[point[1] for point in coordinates])
     result: dict[str, float] = {}
-    for identifier, (lat, lon) in targets.items():
-        x, y = transform.transform(lon, lat)
-        target_node = ox.distance.nearest_nodes(graph, x, y)
+    for identifier, target_node in zip(identifiers, target_nodes, strict=True):
         seconds = lengths.get(target_node)
         if seconds is not None:
             result[identifier] = round(float(seconds) / 60, 2)
