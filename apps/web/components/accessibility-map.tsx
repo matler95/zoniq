@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
 type Coordinates = { lat: number; lon: number };
 export type ReachabilityMap = {
   type: "FeatureCollection";
-  features: Array<{ type: "Feature"; geometry: { type: "Point"; coordinates: [number, number] }; properties: { travel_minutes: number; name: string; route: string } }>;
+  features: Array<{ type: "Feature"; geometry: { type: "Point"; coordinates: [number, number] }; properties: { travel_minutes: number; name: string; route: string; dominant_route_type?: number } }>;
 };
 
 type AccessibilityMapProps = {
@@ -48,7 +48,8 @@ export function AccessibilityMap({ origin, destination, reachability, selectingO
       instance.addLayer({ id: "reachability-stops", type: "circle", source: "reachability", paint: {
         "circle-radius": ["interpolate", ["linear"], ["get", "travel_minutes"], 0, 12, 15, 10, 30, 8, 45, 6, 60, 5, 180, 4],
         "circle-color": ["step", ["get", "travel_minutes"], "#f35e5a", 15, "#32cce3", 30, "#68dc77", 45, "#f2d04f", 60, "#f49642"],
-        "circle-opacity": ["interpolate", ["linear"], ["coalesce", ["get", "reachable_probability"], 1], 0, 0.15, 1, 0.86], "circle-stroke-color": "#ffffff", "circle-stroke-width": 1
+        "circle-opacity": ["interpolate", ["linear"], ["coalesce", ["get", "reachable_probability"], 1], 0, 0.15, 1, 0.86],
+        "circle-stroke-color": ["match", ["coalesce", ["get", "dominant_route_type"], -1], 0, "#ff554b", 1, "#3487ff", 2, "#f6f8ff", 3, "#ffe150", "#ffffff"], "circle-stroke-width": 2
       } });
       instance.on("click", "reachability-stops", event => {
         const feature = event.features?.[0];
