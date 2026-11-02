@@ -71,7 +71,7 @@ export function ScenarioWorkspace() {
     try {
       const response = await fetch(`${API_URL}/api/simulations`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ origin, origin_label: originLabel, journey_date: date, departure_time: time, departure_window_minutes: windowMinutes, max_travel_time_minutes: limit, max_transfers: 1, transport_modes: selectedModes.map(mode => ({ "pieszo": "walk", "autobus": "bus", "tramwaj": "tram", "metro": "metro", SKM: "skm", KM: "km", WKD: "wkd" })[mode]) })
+        body: JSON.stringify({ origin, origin_label: originLabel, journey_date: date, departure_time: time, departure_window_minutes: windowMinutes, max_travel_time_minutes: limit, max_transfers: 2, transport_modes: selectedModes.map(mode => ({ "pieszo": "walk", "autobus": "bus", "tramwaj": "tram", "metro": "metro", SKM: "skm", KM: "km", WKD: "wkd" })[mode]) })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail ?? "Nie udało się utworzyć symulacji.");

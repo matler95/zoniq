@@ -207,11 +207,7 @@ def find_reachable_stops(
     max_transfers: int = 0,
     origin_stops: list[dict[str, float | str]] | None = None,
 ) -> list[dict[str, object]]:
-    """Return scheduled, directly reachable stops for an accessibility map.
-
-    Each feature includes waiting time and the walk needed to reach its first
-    stop. One same-stop transfer is supported as the first RAPTOR-like round.
-    """
+    """Return stops reachable after up to two transit transfer rounds."""
     if not database.is_file() or not route_types:
         return []
     with sqlite3.connect(database) as connection:
@@ -261,15 +257,23 @@ def find_reachable_stops(
                 str(stop_id): (float(lat), float(lon))
                 for stop_id, lat, lon in connection.execute("SELECT stop_id, lat, lon FROM stops")
             }
-            candidates = sorted(reachable.values(), key=lambda item: int(item["arrival_seconds"]))[:160]
-            for transfer in candidates:
-                transfer_position = stop_positions.get(str(transfer["stop_id"]))
-                if transfer_position is None:
-                    continue
-                transfer_options = _nearby_transfer_stops(stop_positions, *transfer_position)
-                for board_stop_id, walking_minutes in transfer_options:
-                    rows = connection.execute(
-                    f"""SELECT b.stop_id, s.name, s.lat, s.lon, r.short_name, r.route_type, b.arrival_seconds
+            # RAPTOR-style rounds: board again only from stops improved by the
+            # preceding round. We intentionally cap the public product model
+            # at two transfers; further transfers degrade reliability and make
+            # the minute-window simulations disproportionately expensive.
+            for transfer_round in range(min(max_transfers, 2)):
+                candidates = sorted(
+                    (item for item in reachable.values() if int(item["transfers"]) == transfer_round),
+                    key=lambda item: int(item["arrival_seconds"]),
+                )[:160]
+                for transfer in candidates:
+                    transfer_position = stop_positions.get(str(transfer["stop_id"]))
+                    if transfer_position is None:
+                        continue
+                    transfer_options = _nearby_transfer_stops(stop_positions, *transfer_position)
+                    for board_stop_id, walking_minutes in transfer_options:
+                        rows = connection.execute(
+                        f"""SELECT b.stop_id, s.name, s.lat, s.lon, r.short_name, r.route_type, b.arrival_seconds
                         FROM stop_times a
                         JOIN stop_times b ON b.trip_id = a.trip_id AND b.stop_sequence > a.stop_sequence
                         JOIN trips t ON t.trip_id = a.trip_id
@@ -279,25 +283,25 @@ def find_reachable_stops(
                           AND a.departure_seconds <= ?
                           AND t.service_id IN ({service_slots})
                           AND r.route_type IN ({type_slots})""",
-                        (board_stop_id, int(transfer["arrival_seconds"]) + 120 + round(walking_minutes * 60), departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
-                    )
-                    for stop_id, name, lat, lon, route, route_type, arrival in rows:
-                        minutes = round((arrival - departure_seconds) / 60, 1)
-                        if minutes < 0 or minutes > max_travel_minutes:
-                            continue
-                        existing = reachable.get(stop_id)
-                        if existing is None or minutes < float(existing["travel_minutes"]):
-                            reachable[stop_id] = {
-                                "stop_id": stop_id,
-                                "name": name,
-                                "lat": lat,
-                                "lon": lon,
-                                "travel_minutes": minutes,
-                                "arrival_seconds": arrival,
-                                "route": f"{transfer['route']} → {route or 'bez numeru'}",
-                                "route_type": route_type,
-                                "transfers": 1,
-                            }
+                            (board_stop_id, int(transfer["arrival_seconds"]) + 120 + round(walking_minutes * 60), departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
+                        )
+                        for stop_id, name, lat, lon, route, route_type, arrival in rows:
+                            minutes = round((arrival - departure_seconds) / 60, 1)
+                            if minutes < 0 or minutes > max_travel_minutes:
+                                continue
+                            existing = reachable.get(stop_id)
+                            if existing is None or minutes < float(existing["travel_minutes"]):
+                                reachable[stop_id] = {
+                                    "stop_id": stop_id,
+                                    "name": name,
+                                    "lat": lat,
+                                    "lon": lon,
+                                    "travel_minutes": minutes,
+                                    "arrival_seconds": arrival,
+                                    "route": f"{transfer['route']} → {route or 'bez numeru'}",
+                                    "route_type": route_type,
+                                    "transfers": transfer_round + 1,
+                                }
         return [{key: value for key, value in item.items() if key != "arrival_seconds"} for item in sorted(reachable.values(), key=lambda item: float(item["travel_minutes"]))]
 
 
