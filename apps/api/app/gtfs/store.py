@@ -257,9 +257,18 @@ def find_reachable_stops(
                     }
 
         if max_transfers > 0:
+            stop_positions = {
+                str(stop_id): (float(lat), float(lon))
+                for stop_id, lat, lon in connection.execute("SELECT stop_id, lat, lon FROM stops")
+            }
             candidates = sorted(reachable.values(), key=lambda item: int(item["arrival_seconds"]))[:160]
             for transfer in candidates:
-                rows = connection.execute(
+                transfer_position = stop_positions.get(str(transfer["stop_id"]))
+                if transfer_position is None:
+                    continue
+                transfer_options = _nearby_transfer_stops(stop_positions, *transfer_position)
+                for board_stop_id, walking_minutes in transfer_options:
+                    rows = connection.execute(
                     f"""SELECT b.stop_id, s.name, s.lat, s.lon, r.short_name, r.route_type, b.arrival_seconds
                         FROM stop_times a
                         JOIN stop_times b ON b.trip_id = a.trip_id AND b.stop_sequence > a.stop_sequence
@@ -270,25 +279,25 @@ def find_reachable_stops(
                           AND a.departure_seconds <= ?
                           AND t.service_id IN ({service_slots})
                           AND r.route_type IN ({type_slots})""",
-                    (transfer["stop_id"], int(transfer["arrival_seconds"]) + 120, departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
-                )
-                for stop_id, name, lat, lon, route, route_type, arrival in rows:
-                    minutes = round((arrival - departure_seconds) / 60, 1)
-                    if minutes < 0 or minutes > max_travel_minutes:
-                        continue
-                    existing = reachable.get(stop_id)
-                    if existing is None or minutes < float(existing["travel_minutes"]):
-                        reachable[stop_id] = {
-                            "stop_id": stop_id,
-                            "name": name,
-                            "lat": lat,
-                            "lon": lon,
-                            "travel_minutes": minutes,
-                            "arrival_seconds": arrival,
-                            "route": f"{transfer['route']} → {route or 'bez numeru'}",
-                            "route_type": route_type,
-                            "transfers": 1,
-                        }
+                        (board_stop_id, int(transfer["arrival_seconds"]) + 120 + round(walking_minutes * 60), departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
+                    )
+                    for stop_id, name, lat, lon, route, route_type, arrival in rows:
+                        minutes = round((arrival - departure_seconds) / 60, 1)
+                        if minutes < 0 or minutes > max_travel_minutes:
+                            continue
+                        existing = reachable.get(stop_id)
+                        if existing is None or minutes < float(existing["travel_minutes"]):
+                            reachable[stop_id] = {
+                                "stop_id": stop_id,
+                                "name": name,
+                                "lat": lat,
+                                "lon": lon,
+                                "travel_minutes": minutes,
+                                "arrival_seconds": arrival,
+                                "route": f"{transfer['route']} → {route or 'bez numeru'}",
+                                "route_type": route_type,
+                                "transfers": 1,
+                            }
         return [{key: value for key, value in item.items() if key != "arrival_seconds"} for item in sorted(reachable.values(), key=lambda item: float(item["travel_minutes"]))]
 
 
@@ -371,6 +380,16 @@ def _nearby_stops(connection: sqlite3.Connection, lat: float, lon: float, radius
         if distance <= radius_meters:
             candidates.append({"id": stop_id, "walk_minutes": distance / WALKING_SPEED_METERS_PER_MINUTE})
     return sorted(candidates, key=lambda stop: float(stop["walk_minutes"]))[:8]
+
+
+def _nearby_transfer_stops(stop_positions: dict[str, tuple[float, float]], lat: float, lon: float) -> list[tuple[str, float]]:
+    """Return nearby boarding platforms for a transfer, including the same stop."""
+    candidates = [
+        (stop_id, _distance(lat, lon, stop_lat, stop_lon) / WALKING_SPEED_METERS_PER_MINUTE)
+        for stop_id, (stop_lat, stop_lon) in stop_positions.items()
+        if _distance(lat, lon, stop_lat, stop_lon) <= 350
+    ]
+    return sorted(candidates, key=lambda item: item[1])[:8]
 
 
 def _stop_by_id(stops: list[dict[str, float | str]], stop_id: str) -> dict[str, float | str]:
