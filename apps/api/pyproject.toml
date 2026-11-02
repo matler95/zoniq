@@ -9,6 +9,7 @@ dependencies = [
   "osmnx>=2.0,<3",
   "pyrosm>=0.6,<1",
   "scipy>=1.14,<2",
+  "scikit-learn>=1.6,<2",
   "uvicorn[standard]>=0.34,<1"
 ]
 

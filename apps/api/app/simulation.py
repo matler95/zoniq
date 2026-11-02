@@ -2,6 +2,7 @@ from hashlib import sha256
 from pathlib import Path
 from .gtfs import find_reachable_stops, latest_report
 from .schemas import SimulationRequest, SimulationResponse
+from .walking_access import walking_origin_stops
 
 
 _SIMULATIONS: dict[str, dict[str, object]] = {}
@@ -26,7 +27,8 @@ def create_simulation(request: SimulationRequest, database: Path) -> SimulationR
     simulation_id = f"sim_{sha256(payload.encode()).hexdigest()[:10]}"
     route_types = tuple(sorted({_MODE_ROUTE_TYPES[mode.value] for mode in request.transport_modes if mode.value in _MODE_ROUTE_TYPES}))
     departure_seconds = request.departure_time.hour * 3600 + request.departure_time.minute * 60 + request.departure_time.second
-    stops = _aggregate_departure_window(request, database, route_types, departure_seconds)
+    origin_stops = walking_origin_stops(database, (request.origin.lat, request.origin.lon))
+    stops = _aggregate_departure_window(request, database, route_types, departure_seconds, origin_stops)
     features = [{
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [stop["lon"], stop["lat"]]},
@@ -38,11 +40,12 @@ def create_simulation(request: SimulationRequest, database: Path) -> SimulationR
         "features": features,
         "metadata": {"max_travel_minutes": request.max_travel_time_minutes, "data_version": report.sha256[:12]},
     }
+    walking_note = "Dojście do przystanków liczy lokalny graf chodników OSM." if origin_stops is not None else "Dojście do przystanków jest obecnie przybliżone, ponieważ kafel OSM dla tego punktu nie jest jeszcze gotowy."
     return SimulationResponse(
         simulation_id=simulation_id,
         status="completed",
         data_version=report.sha256[:12],
-        disclaimer="Wynik uśrednia starty co minutę w wybranym oknie. Obsługuje kursy bezpośrednie i jedną przesiadkę na tym samym przystanku; izochrony i dojścia po sieci OSM są kolejnym etapem.",
+        disclaimer=f"Wynik uśrednia starty co minutę w wybranym oknie. Obsługuje kursy bezpośrednie i jedną przesiadkę na tym samym przystanku. {walking_note}",
         map_data_url=f"/api/simulations/{simulation_id}/map",
         reachable_stops=len(features),
         time_bands=time_bands,
@@ -56,13 +59,14 @@ def simulation_map(simulation_id: str) -> dict[str, object] | None:
 
 def _aggregate_departure_window(
     request: SimulationRequest, database: Path, route_types: tuple[int, ...], departure_seconds: int,
+    origin_stops: list[dict[str, float | str]] | None = None,
 ) -> list[dict[str, object]]:
     """Aggregate independent one-minute travel starts into map statistics."""
     aggregate: dict[str, dict[str, object]] = {}
     for minute in range(request.departure_window_minutes):
         stops = find_reachable_stops(
             database, (request.origin.lat, request.origin.lon), request.journey_date,
-            departure_seconds + minute * 60, request.max_travel_time_minutes, route_types, request.max_transfers,
+            departure_seconds + minute * 60, request.max_travel_time_minutes, route_types, request.max_transfers, origin_stops,
         )
         for stop in stops:
             stop_id = str(stop["stop_id"])

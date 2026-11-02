@@ -205,6 +205,7 @@ def find_reachable_stops(
     max_travel_minutes: int,
     route_types: tuple[int, ...],
     max_transfers: int = 0,
+    origin_stops: list[dict[str, float | str]] | None = None,
 ) -> list[dict[str, object]]:
     """Return scheduled, directly reachable stops for an accessibility map.
 
@@ -214,7 +215,7 @@ def find_reachable_stops(
     if not database.is_file() or not route_types:
         return []
     with sqlite3.connect(database) as connection:
-        origin_stops = _nearby_stops(connection, *origin)
+        origin_stops = _nearby_stops(connection, *origin) if origin_stops is None else origin_stops
         active_services = _active_services(connection, journey_date)
         if not origin_stops or not active_services:
             return []
