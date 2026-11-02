@@ -7,6 +7,7 @@ dependencies = [
   "fastapi>=0.115,<1",
   "networkx>=3.4,<4",
   "osmnx>=2.0,<3",
+  "pyrosm>=0.6,<1",
   "uvicorn[standard]>=0.34,<1"
 ]
 

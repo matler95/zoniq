@@ -38,6 +38,94 @@ def prepare_walking_graph(destination: Path, *, north: float, south: float, east
     return report
 
 
+def prepare_walking_graph_from_pbf(
+    source: Path,
+    destination: Path,
+    *,
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    tiles: int = 1,
+) -> WalkingGraphReport:
+    """Extract and persist a walk graph from a downloaded OSM PBF extract.
+
+    PBF parsing makes graph preparation deterministic and avoids a runtime
+    dependency on an Overpass instance.  ``pyrosm`` creates a pedestrian graph
+    with both directions available; OSMnx then projects and serializes it in
+    the same GraphML format as the legacy online importer.
+    """
+    if not source.is_file():
+        raise FileNotFoundError(f"Brak pliku PBF: {source}")
+    if not south < north or not west < east:
+        raise ValueError("Nieprawidłowe granice obszaru OSM.")
+    if tiles < 1:
+        raise ValueError("Liczba kafli musi być dodatnia.")
+
+    import osmnx as ox
+    from pyrosm import OSM
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # A complete urban extract can temporarily require too much RAM while the
+    # PBF parser creates intermediate GeoDataFrames.  Small overlapping tiles
+    # keep the peak bounded while shared OSM node ids stitch their graphs back
+    # together into one routing network.
+    tile_width = (east - west) / tiles
+    tile_height = (north - south) / tiles
+    overlap = 0.002  # roughly 140–220 m in Warsaw, enough to preserve joins
+    graphs: list[nx.MultiDiGraph] = []
+    for column in range(tiles):
+        for row in range(tiles):
+            tile_west = max(west, west + column * tile_width - overlap)
+            tile_east = min(east, west + (column + 1) * tile_width + overlap)
+            tile_south = max(south, south + row * tile_height - overlap)
+            tile_north = min(north, south + (row + 1) * tile_height + overlap)
+            osm = OSM(source, bounding_box=[tile_west, tile_south, tile_east, tile_north])
+            graphs.append(
+                osm.get_graph(
+                    network_type="walking",
+                    graph_type="networkx",
+                    force_bidirectional=True,
+                    retain_all=True,
+                    simplify=True,
+                )
+            )
+    graph = nx.compose_all(graphs)
+    if graph.number_of_nodes() == 0:
+        raise ValueError("Wybrany obszar nie zawiera sieci pieszej w pliku PBF.")
+    # Keep the Pyrosm graph in WGS84.  Projecting a city-scale MultiDiGraph
+    # duplicates its geometry and is needlessly memory-intensive; OSMnx's
+    # nearest-node helper supports geographic graphs directly.
+    graph.graph["crs"] = "EPSG:4326"
+    for _, _, _, attributes in graph.edges(keys=True, data=True):
+        length = float(attributes.get("length", 0))
+        multiplier = 2 if str(attributes.get("highway", "")) == "steps" else 1
+        attributes["walk_seconds"] = round(length / WALKING_SPEED_METERS_PER_MINUTE * 60 * multiplier, 1)
+    ox.save_graphml(graph, destination)
+    report = WalkingGraphReport(nodes=graph.number_of_nodes(), edges=graph.number_of_edges(), crs=str(graph.graph["crs"]))
+    destination.with_suffix(".json").write_text(json.dumps(report.__dict__, indent=2), encoding="utf-8")
+    return report
+
+
+def merge_walking_graphs(sources: list[Path], destination: Path) -> WalkingGraphReport:
+    """Merge independently prepared, overlapping GraphML tiles into one graph."""
+    if not sources:
+        raise ValueError("Wskaż co najmniej jeden kafel grafu.")
+
+    import osmnx as ox
+
+    missing = [str(source) for source in sources if not source.is_file()]
+    if missing:
+        raise FileNotFoundError(f"Brak kafli grafu: {', '.join(missing)}")
+    graphs = [ox.load_graphml(source) for source in sources]
+    graph = nx.compose_all(graphs)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    ox.save_graphml(graph, destination)
+    report = WalkingGraphReport(nodes=graph.number_of_nodes(), edges=graph.number_of_edges(), crs=str(graph.graph["crs"]))
+    destination.with_suffix(".json").write_text(json.dumps(report.__dict__, indent=2), encoding="utf-8")
+    return report
+
+
 def walking_minutes_to_points(graph_path: Path, origin: tuple[float, float], targets: dict[str, tuple[float, float]], max_minutes: int) -> dict[str, float]:
     """Compute network walking time from one WGS84 point to named WGS84 targets."""
     import osmnx as ox
@@ -63,12 +151,26 @@ def walking_minutes_to_points(graph_path: Path, origin: tuple[float, float], tar
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare an OSM walking graph for zoniq.")
     parser.add_argument("destination", type=Path)
-    parser.add_argument("--north", type=float, required=True)
-    parser.add_argument("--south", type=float, required=True)
-    parser.add_argument("--east", type=float, required=True)
-    parser.add_argument("--west", type=float, required=True)
+    parser.add_argument("--north", type=float)
+    parser.add_argument("--south", type=float)
+    parser.add_argument("--east", type=float)
+    parser.add_argument("--west", type=float)
+    parser.add_argument("--pbf", type=Path, help="lokalny wyciąg OpenStreetMap .osm.pbf")
+    parser.add_argument("--tiles", type=int, default=1, help="podział PBF na kafle dla ograniczenia pamięci")
+    parser.add_argument("--merge", type=Path, nargs="+", help="scal przygotowane kafle GraphML")
     args = parser.parse_args()
-    print(json.dumps(prepare_walking_graph(args.destination, north=args.north, south=args.south, east=args.east, west=args.west).__dict__))
+    if args.merge:
+        print(json.dumps(merge_walking_graphs(args.merge, args.destination).__dict__))
+        return
+    if None in (args.north, args.south, args.east, args.west):
+        parser.error("--north, --south, --east i --west są wymagane przy przygotowaniu grafu")
+    prepare = prepare_walking_graph_from_pbf if args.pbf else prepare_walking_graph
+    kwargs = {"north": args.north, "south": args.south, "east": args.east, "west": args.west}
+    if args.pbf:
+        report = prepare(args.pbf, args.destination, tiles=args.tiles, **kwargs)
+    else:
+        report = prepare(args.destination, **kwargs)
+    print(json.dumps(report.__dict__))
 
 
 if __name__ == "__main__":
