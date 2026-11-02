@@ -38,6 +38,13 @@ export function AccessibilityMap({ origin, destination, reachability, selectingO
     instance.addControl(new maplibregl.NavigationControl(), "bottom-right");
     instance.on("load", () => {
       instance.addSource("reachability", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      instance.addLayer({ id: "reachability-surface", type: "heatmap", source: "reachability", paint: {
+        "heatmap-weight": ["*", ["interpolate", ["linear"], ["get", "travel_minutes"], 0, 1, 15, 0.95, 30, 0.72, 45, 0.45, 60, 0.25, 180, 0.05], ["coalesce", ["get", "reachable_probability"], 1]],
+        "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 9, 0.7, 12, 1.5, 14, 2],
+        "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 9, 20, 11, 35, 13, 50],
+        "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(0,0,0,0)", 0.15, "rgba(47,204,227,0.14)", 0.35, "rgba(104,220,119,0.3)", 0.6, "rgba(242,208,79,0.46)", 0.82, "rgba(244,150,66,0.62)", 1, "rgba(243,94,90,0.76)"],
+        "heatmap-opacity": 0.85
+      } });
       instance.addLayer({ id: "reachability-stops", type: "circle", source: "reachability", paint: {
         "circle-radius": ["interpolate", ["linear"], ["get", "travel_minutes"], 0, 12, 15, 10, 30, 8, 45, 6, 60, 5, 180, 4],
         "circle-color": ["step", ["get", "travel_minutes"], "#f35e5a", 15, "#32cce3", 30, "#68dc77", 45, "#f2d04f", 60, "#f49642"],
