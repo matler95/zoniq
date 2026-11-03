@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import heapq
 import json
+import pickle
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import count
 from pathlib import Path
 
 import networkx as nx
@@ -130,11 +132,29 @@ def merge_walking_graphs(sources: list[Path], destination: Path) -> WalkingGraph
 
 @lru_cache(maxsize=1)
 def _load_walking_graph(graph_path: str) -> nx.MultiDiGraph:
+    """Load a tile, retaining a binary cache beside its portable GraphML.
+
+    GraphML is kept as the durable, inspectable source artefact.  Parsing a
+    dense city tile costs tens of seconds, however, so the first load creates
+    a local pickle cache and subsequent simulations can begin routing without
+    reparsing XML.  The cache is automatically invalidated when GraphML is
+    regenerated.
+    """
     import osmnx as ox
 
-    graph = ox.load_graphml(graph_path)
+    source = Path(graph_path)
+    cache = source.with_suffix(".pickle")
+    if cache.is_file() and cache.stat().st_mtime >= source.stat().st_mtime:
+        with cache.open("rb") as handle:
+            return pickle.load(handle)
+
+    graph = ox.load_graphml(source)
     for _, _, _, attributes in graph.edges(keys=True, data=True):
         attributes["walk_seconds"] = float(attributes["walk_seconds"])
+    temporary = cache.with_suffix(".pickle.tmp")
+    with temporary.open("wb") as handle:
+        pickle.dump(graph, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    temporary.replace(cache)
     return graph
 
 
@@ -185,11 +205,12 @@ def walking_surface_from_stops(
     nodes = ox.distance.nearest_nodes(graph, X=[point[0] for point in coordinates], Y=[point[1] for point in coordinates])
     distances: dict[object, float] = {}
     queue: list[tuple[float, int, object]] = []
-    for index, (node, stop) in enumerate(zip(nodes, stops, strict=True)):
+    sequence = count()
+    for node, stop in zip(nodes, stops, strict=True):
         elapsed = float(stop["travel_minutes"]) * 60
         if elapsed < distances.get(node, float("inf")):
             distances[node] = elapsed
-            heapq.heappush(queue, (elapsed, index, node))
+            heapq.heappush(queue, (elapsed, next(sequence), node))
     cutoff = max_minutes * 60
     while queue:
         current, _, node = heapq.heappop(queue)
@@ -199,7 +220,7 @@ def walking_surface_from_stops(
             candidate = current + float(attributes["walk_seconds"])
             if candidate <= cutoff and candidate < distances.get(neighbor, float("inf")):
                 distances[neighbor] = candidate
-                heapq.heappush(queue, (candidate, len(queue), neighbor))
+                heapq.heappush(queue, (candidate, next(sequence), neighbor))
     ordered = sorted(distances.items(), key=lambda item: item[1])
     stride = max(1, len(ordered) // sample_limit)
     samples = []

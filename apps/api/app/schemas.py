@@ -25,7 +25,7 @@ class SimulationRequest(BaseModel):
     departure_time: time = time(17, 0)
     departure_window_minutes: int = Field(default=60, ge=1, le=120)
     max_travel_time_minutes: int = Field(default=60, ge=5, le=180)
-    max_transfers: int = Field(default=2, ge=0, le=3)
+    max_transfers: int = Field(default=2, ge=0, le=2)
     transport_modes: list[TransportMode] = list(TransportMode)
 
 
@@ -45,7 +45,7 @@ class JourneyRequest(BaseModel):
     destination: Coordinates
     journey_date: date
     departure_time: time
-    max_transfers: int = Field(default=1, ge=0, le=1)
+    max_transfers: int = Field(default=2, ge=0, le=2)
     transport_modes: list[TransportMode] = list(TransportMode)
 
 

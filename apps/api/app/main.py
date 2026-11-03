@@ -96,10 +96,11 @@ def post_journey(request: JourneyRequest) -> JourneyResponse:
     with_transfer = find_one_transfer_journeys(
         GTFS_DATABASE, (request.origin.lat, request.origin.lon), (request.destination.lat, request.destination.lon),
         request.journey_date, departure_seconds, route_types, origin_stops=origin_stops, destination_stops=destination_stops,
+        max_transfers=request.max_transfers,
     ) if request.max_transfers else []
     journeys = sorted([*direct, *with_transfer], key=lambda journey: float(journey["duration_minutes"]))[:3]
     return JourneyResponse(
         data_version=report.sha256[:12] if report else "unprepared",
-        search_scope="scheduled trips with walking access and at most one same-stop transfer",
+        search_scope="scheduled trips with walking access and up to two transfers between nearby platforms",
         journeys=journeys,
     )

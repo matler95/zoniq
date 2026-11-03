@@ -4,7 +4,12 @@ Interaktywna mapa dostępności komunikacyjnej Warszawy i aglomeracji. Użytkown
 
 ## Stan
 
-Pierwszy pionowy wycinek jest gotowy: responsywny interfejs scenariusza, FastAPI i lokalny indeks rozkładów GTFS. Aktualna mapa pokazuje osiągalne przystanki i podstawowe szczegóły trasy; nie jest jeszcze końcową powierzchnią zasięgu. Docelowy silnik doda graf pieszy OSM, RAPTOR do dwóch przesiadek oraz uśrednianie wyników startów co minutę w oknie analizy.
+Faza 1 jest gotowa lokalnie: użytkownik wskazuje jeden punkt startowy, datę,
+godzinę, okno analizy, środki transportu oraz limit 15/30/45/60 minut albo
+własną wartość. Aplikacja uśrednia odjazdy co minutę, łączy lokalny rozkład
+GTFS ZTM z grafem pieszym OpenStreetMap i pokazuje ciągłą powierzchnię
+dostępności. Kliknięcie punktu na mapie daje pomocniczy, szczegółowy wariant
+podróży z maksymalnie dwiema przesiadkami.
 
 ## Uruchomienie
 
@@ -37,7 +42,7 @@ python -m app.gtfs inspect ..\..\data\raw\gtfs\ztm\feed.zip --feed-id ztm
 Polecenie weryfikuje obowiązkowe tabele i kolumny GTFS, liczy rekordy,
 zapisuje hash SHA-256 oraz zakres kalendarza do `data/processed/metadata/`.
 
-Przygotowanie lokalnego indeksu zapytań dla pierwszych tras bez przesiadek:
+Przygotowanie lokalnego indeksu zapytań:
 
 ```bash
 python -m app.gtfs prepare ..\..\data\raw\gtfs\ztm\feed.zip --feed-id ztm --database ..\..\data\processed\ztm.sqlite
@@ -53,7 +58,22 @@ python -m app.walking ..\..\data\processed\walking\warsaw.graphml --north 52.38 
 
 Krawędzie chodnikowe mają wagę czasu marszu; schody liczą się podwójnie.
 
-Po przygotowaniu feedu `POST /api/journeys` zwraca pierwsze planowe połączenia bez przesiadki dla pary współrzędnych. API wyraźnie oznacza zakres tego etapu; algorytm wieloprzejściowy jest kolejnym krokiem silnika.
+Po przygotowaniu feedu `POST /api/simulations` uruchamia w tle mapę zasięgu,
+a `GET /api/simulations/{id}` zwraca jej status. `POST /api/journeys` jest
+funkcją pomocniczą dla klikniętego celu i obsługuje dojścia piesze oraz do
+dwóch przesiadek między pobliskimi peronami.
+
+### Sprawdzenie rzeczywistego przebiegu
+
+Po przygotowaniu danych uruchom próbę Kabaty, sobota 17:00:
+
+```bash
+cd apps/api
+python -m scripts.verify_real_simulation --limit 15 --window 1
+```
+
+Skrypt korzysta z prawdziwej bazy GTFS i kafla OSM, dlatego nie jest częścią
+szybkich testów jednostkowych.
 
 ## Plan MVP
 

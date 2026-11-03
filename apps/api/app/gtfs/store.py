@@ -8,6 +8,7 @@ import json
 import math
 import sqlite3
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -15,6 +16,7 @@ from .ingestion import FeedReport, inspect_feed, scope_id
 
 WALKING_SPEED_METERS_PER_MINUTE = 75.0
 EARTH_RADIUS_METERS = 6_371_000
+_TRANSFER_GRID_DEGREES = 0.004
 
 
 def prepare_store(archive: Path, database: Path, feed_id: str) -> FeedReport:
@@ -45,6 +47,7 @@ def prepare_store(archive: Path, database: Path, feed_id: str) -> FeedReport:
         connection.commit()
     finally:
         connection.close()
+    _stop_transfer_index.cache_clear()
     return report
 
 
@@ -130,12 +133,14 @@ def find_one_transfer_journeys(
     limit: int = 3,
     origin_stops: list[dict[str, float | str]] | None = None,
     destination_stops: list[dict[str, float | str]] | None = None,
+    max_transfers: int = 1,
 ) -> list[dict[str, object]]:
-    """Find a scheduled journey with at most one same-stop transfer.
+    """Find scheduled journeys with one or two transfers.
 
-    The query deliberately bounds candidate trips and transfer stops. It is a
-    practical first RAPTOR-like round over the prepared stop-time indexes; the
-    next step will add walking transfers between distinct platforms/stops.
+    Every round starts from stops improved by the preceding ride, permits a
+    short walk to a neighbouring platform and reserves two minutes before the
+    next departure.  This is the detailed-route counterpart of the bounded
+    RAPTOR-style search used by :func:`find_reachable_stops`.
     """
     if not database.is_file():
         return []
@@ -159,45 +164,90 @@ def find_one_transfer_journeys(
             )
             first_boards.extend((trip, sequence, depart, float(stop["walk_minutes"])) for trip, sequence, depart in rows)
 
-        transfer_arrivals: dict[str, tuple[int, int, float, str]] = {}
+        if max_transfers < 1:
+            return []
+
+        stop_positions, stop_buckets = _stop_transfer_index(str(database.resolve()))
+        route_cache: dict[str, str] = {}
+
+        def route_for_trip(trip_id: str) -> str:
+            if trip_id not in route_cache:
+                route_cache[trip_id] = _route_for_trip(connection, trip_id)
+            return route_cache[trip_id]
+
+        # A state represents an arrival after its current ride.  Keep only the
+        # fastest arrival at a platform in a round: a later arrival cannot make
+        # any later boarding option feasible that the earlier one cannot.
+        current_round: dict[str, dict[str, object]] = {}
         for trip_id, board_sequence, first_departure, access in first_boards:
             for stop_id, arrival in connection.execute("SELECT stop_id, arrival_seconds FROM stop_times WHERE trip_id = ? AND stop_sequence > ? AND arrival_seconds <= ?", (trip_id, board_sequence, first_departure + 5_400)):
-                previous = transfer_arrivals.get(stop_id)
-                candidate = (arrival, first_departure, access, trip_id)
-                if previous is None or candidate[0] < previous[0]:
-                    transfer_arrivals[stop_id] = candidate
+                state = {
+                    "stop_id": str(stop_id),
+                    "arrival_seconds": int(arrival),
+                    "first_departure": first_departure,
+                    "access": access,
+                    "trip_ids": (str(trip_id),),
+                    "routes": (route_for_trip(str(trip_id)),),
+                }
+                previous = current_round.get(str(stop_id))
+                if previous is None or int(state["arrival_seconds"]) < int(previous["arrival_seconds"]):
+                    current_round[str(stop_id)] = state
 
         destinations = {str(stop["id"]): float(stop["walk_minutes"]) for stop in destination_stops}
         found: list[dict[str, object]] = []
-        for transfer_stop, (arrival, first_departure, access, first_trip) in sorted(transfer_arrivals.items(), key=lambda item: item[1][0])[:250]:
-            second_boards = connection.execute(
-                f"""SELECT a.trip_id, a.stop_sequence, a.departure_seconds
-                    FROM stop_times a JOIN trips t ON t.trip_id = a.trip_id JOIN routes r ON r.route_id = t.route_id
-                    WHERE a.stop_id = ? AND a.departure_seconds >= ? AND t.service_id IN ({active_slots}) {type_filter}
-                    ORDER BY a.departure_seconds LIMIT 4""",
-                (transfer_stop, arrival + 120, *active_services, *(route_types or ())),
-            )
-            for second_trip, second_sequence, second_departure in second_boards:
-                arrival_rows = connection.execute(
-                    f"SELECT stop_id, arrival_seconds FROM stop_times WHERE trip_id = ? AND stop_sequence > ? AND stop_id IN ({','.join('?' for _ in destinations)}) ORDER BY arrival_seconds LIMIT 1",
-                    (second_trip, second_sequence, *destinations),
-                ).fetchone()
-                if arrival_rows is None:
+        for transfer_round in range(min(max_transfers, 2)):
+            next_round: dict[str, dict[str, object]] = {}
+            candidates = sorted(current_round.values(), key=lambda state: int(state["arrival_seconds"]))[:250]
+            for state in candidates:
+                position = stop_positions.get(str(state["stop_id"]))
+                if position is None:
                     continue
-                destination_stop, final_arrival = arrival_rows
-                egress = destinations[destination_stop]
-                found.append({
-                    "route": f"{_route_for_trip(connection, first_trip)} → {_route_for_trip(connection, second_trip)}",
-                    "route_type": None,
-                    "departure_seconds": first_departure,
-                    "arrival_seconds": final_arrival,
-                    "duration_minutes": round((final_arrival - departure_seconds) / 60 + access + egress, 1),
-                    "access_walk_minutes": round(access, 1),
-                    "egress_walk_minutes": round(egress, 1),
-                    "from_stop_id": None,
-                    "to_stop_id": destination_stop,
-                    "transfers": 1,
-                })
+                for board_stop_id, platform_walk in _nearby_transfer_stops(stop_positions, stop_buckets, *position):
+                    second_boards = connection.execute(
+                        f"""SELECT a.trip_id, a.stop_sequence, a.departure_seconds
+                            FROM stop_times a JOIN trips t ON t.trip_id = a.trip_id JOIN routes r ON r.route_id = t.route_id
+                            WHERE a.stop_id = ? AND a.departure_seconds >= ? AND t.service_id IN ({active_slots}) {type_filter}
+                            ORDER BY a.departure_seconds LIMIT 4""",
+                        (board_stop_id, int(state["arrival_seconds"]) + 120 + round(platform_walk * 60), *active_services, *(route_types or ())),
+                    )
+                    for next_trip, next_sequence, _next_departure in second_boards:
+                        next_trip = str(next_trip)
+                        if next_trip in state["trip_ids"]:
+                            continue
+                        for stop_id, arrival in connection.execute(
+                            "SELECT stop_id, arrival_seconds FROM stop_times WHERE trip_id = ? AND stop_sequence > ? AND arrival_seconds <= ?",
+                            (next_trip, next_sequence, int(state["first_departure"]) + 5_400),
+                        ):
+                            routes = (*state["routes"], route_for_trip(next_trip))
+                            trip_ids = (*state["trip_ids"], next_trip)
+                            if str(stop_id) in destinations:
+                                egress = destinations[str(stop_id)]
+                                found.append({
+                                    "route": " → ".join(routes),
+                                    "route_type": None,
+                                    "departure_seconds": state["first_departure"],
+                                    "arrival_seconds": arrival,
+                                    "duration_minutes": round((arrival - departure_seconds) / 60 + float(state["access"]) + egress, 1),
+                                    "access_walk_minutes": round(float(state["access"]), 1),
+                                    "egress_walk_minutes": round(egress, 1),
+                                    "from_stop_id": None,
+                                    "to_stop_id": stop_id,
+                                    "transfers": transfer_round + 1,
+                                })
+                            candidate = {
+                                "stop_id": str(stop_id),
+                                "arrival_seconds": int(arrival),
+                                "first_departure": state["first_departure"],
+                                "access": state["access"],
+                                "trip_ids": trip_ids,
+                                "routes": routes,
+                            }
+                            previous = next_round.get(str(stop_id))
+                            if previous is None or int(candidate["arrival_seconds"]) < int(previous["arrival_seconds"]):
+                                next_round[str(stop_id)] = candidate
+            current_round = next_round
+            if not current_round:
+                break
         return sorted(found, key=lambda journey: float(journey["duration_minutes"]))[:limit]
 
 
@@ -233,10 +283,10 @@ def find_reachable_stops(
                     JOIN routes r ON r.route_id = t.route_id
                     JOIN stops s ON s.stop_id = b.stop_id
                     WHERE a.stop_id = ? AND a.departure_seconds >= ?
-                      AND a.departure_seconds <= ?
+                       AND a.departure_seconds <= ? AND b.arrival_seconds <= ?
                       AND t.service_id IN ({service_slots})
                       AND r.route_type IN ({type_slots})""",
-                (stop["id"], board_after, departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
+                (stop["id"], board_after, departure_seconds + max_travel_minutes * 60, departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
             )
             for stop_id, name, lat, lon, route, route_type, arrival in rows:
                 minutes = round((arrival - departure_seconds) / 60, 1)
@@ -257,10 +307,7 @@ def find_reachable_stops(
                     }
 
         if max_transfers > 0:
-            stop_positions = {
-                str(stop_id): (float(lat), float(lon))
-                for stop_id, lat, lon in connection.execute("SELECT stop_id, lat, lon FROM stops")
-            }
+            stop_positions, stop_buckets = _stop_transfer_index(str(database.resolve()))
             # RAPTOR-style rounds: board again only from stops improved by the
             # preceding round. We intentionally cap the public product model
             # at two transfers; further transfers degrade reliability and make
@@ -274,7 +321,7 @@ def find_reachable_stops(
                     transfer_position = stop_positions.get(str(transfer["stop_id"]))
                     if transfer_position is None:
                         continue
-                    transfer_options = _nearby_transfer_stops(stop_positions, *transfer_position)
+                    transfer_options = _nearby_transfer_stops(stop_positions, stop_buckets, *transfer_position)
                     for board_stop_id, walking_minutes in transfer_options:
                         rows = connection.execute(
                         f"""SELECT b.stop_id, s.name, s.lat, s.lon, r.short_name, r.route_type, b.arrival_seconds
@@ -284,10 +331,10 @@ def find_reachable_stops(
                         JOIN routes r ON r.route_id = t.route_id
                         JOIN stops s ON s.stop_id = b.stop_id
                         WHERE a.stop_id = ? AND a.departure_seconds >= ?
-                          AND a.departure_seconds <= ?
+                          AND a.departure_seconds <= ? AND b.arrival_seconds <= ?
                           AND t.service_id IN ({service_slots})
                           AND r.route_type IN ({type_slots})""",
-                            (board_stop_id, int(transfer["arrival_seconds"]) + 120 + round(walking_minutes * 60), departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
+                            (board_stop_id, int(transfer["arrival_seconds"]) + 120 + round(walking_minutes * 60), departure_seconds + max_travel_minutes * 60, departure_seconds + max_travel_minutes * 60, *active_services, *route_types),
                         )
                         for stop_id, name, lat, lon, route, route_type, arrival in rows:
                             minutes = round((arrival - departure_seconds) / 60, 1)
@@ -390,11 +437,40 @@ def _nearby_stops(connection: sqlite3.Connection, lat: float, lon: float, radius
     return sorted(candidates, key=lambda stop: float(stop["walk_minutes"]))[:8]
 
 
-def _nearby_transfer_stops(stop_positions: dict[str, tuple[float, float]], lat: float, lon: float) -> list[tuple[str, float]]:
+@lru_cache(maxsize=8)
+def _stop_transfer_index(database_path: str) -> tuple[dict[str, tuple[float, float]], dict[tuple[int, int], tuple[str, ...]]]:
+    """Load stop positions once and bucket them for fast platform transfers."""
+    with sqlite3.connect(database_path) as connection:
+        positions = {
+            str(stop_id): (float(lat), float(lon))
+            for stop_id, lat, lon in connection.execute("SELECT stop_id, lat, lon FROM stops")
+        }
+    buckets: dict[tuple[int, int], list[str]] = {}
+    for stop_id, (lat, lon) in positions.items():
+        bucket = (math.floor(lat / _TRANSFER_GRID_DEGREES), math.floor(lon / _TRANSFER_GRID_DEGREES))
+        buckets.setdefault(bucket, []).append(stop_id)
+    return positions, {bucket: tuple(stop_ids) for bucket, stop_ids in buckets.items()}
+
+
+def _nearby_transfer_stops(
+    stop_positions: dict[str, tuple[float, float]],
+    stop_buckets: dict[tuple[int, int], tuple[str, ...]],
+    lat: float,
+    lon: float,
+) -> list[tuple[str, float]]:
     """Return nearby boarding platforms for a transfer, including the same stop."""
+    lat_bucket = math.floor(lat / _TRANSFER_GRID_DEGREES)
+    lon_bucket = math.floor(lon / _TRANSFER_GRID_DEGREES)
+    nearby_ids = (
+        stop_id
+        for row in range(lat_bucket - 2, lat_bucket + 3)
+        for column in range(lon_bucket - 2, lon_bucket + 3)
+        for stop_id in stop_buckets.get((row, column), ())
+    )
     candidates = [
         (stop_id, _distance(lat, lon, stop_lat, stop_lon) / WALKING_SPEED_METERS_PER_MINUTE)
-        for stop_id, (stop_lat, stop_lon) in stop_positions.items()
+        for stop_id in nearby_ids
+        for stop_lat, stop_lon in (stop_positions[stop_id],)
         if _distance(lat, lon, stop_lat, stop_lon) <= 350
     ]
     return sorted(candidates, key=lambda item: item[1])[:8]

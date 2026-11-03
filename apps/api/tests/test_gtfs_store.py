@@ -80,3 +80,27 @@ def test_reachable_stops_allows_walking_transfer_between_platforms(tmp_path: Pat
     reachable = find_reachable_stops(database, (52.200, 21.000), date(2026, 11, 2), 7 * 3600 + 50 * 60, 40, (3,), max_transfers=1)
 
     assert any(stop["stop_id"] == "ztm:B" and stop["transfers"] == 1 for stop in reachable)
+
+
+def test_journey_detail_allows_two_walking_platform_transfers(tmp_path: Path) -> None:
+    archive = tmp_path / "two-platform-transfers.zip"
+    database = tmp_path / "gtfs.sqlite"
+    rows = {
+        "agency.txt": "agency_name,agency_url,agency_timezone\nZTM,https://ztm.waw.pl,Europe/Warsaw\n",
+        "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\nA,Start,52.200,21.000\nX,First arrival,52.212,21.012\nY,First departure,52.2124,21.012\nZ,Second arrival,52.224,21.024\nQ,Second departure,52.2244,21.024\nB,End,52.236,21.036\n",
+        "routes.txt": "route_id,route_short_name,route_type\nR1,1,3\nR2,2,3\nR3,3,3\n",
+        "trips.txt": "route_id,service_id,trip_id\nR1,special,first\nR2,special,second\nR3,special,third\n",
+        "stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nfirst,08:00:00,08:00:00,A,1\nfirst,08:08:00,08:08:00,X,2\nsecond,08:12:00,08:12:00,Y,1\nsecond,08:20:00,08:20:00,Z,2\nthird,08:25:00,08:25:00,Q,1\nthird,08:35:00,08:35:00,B,2\n",
+        "calendar_dates.txt": "service_id,date,exception_type\nspecial,20261102,1\n",
+    }
+    with ZipFile(archive, "w") as zip_file:
+        for filename, contents in rows.items():
+            zip_file.writestr(filename, contents)
+    prepare_store(archive, database, "ztm")
+
+    journeys = find_one_transfer_journeys(
+        database, (52.200, 21.000), (52.236, 21.036), date(2026, 11, 2), 7 * 3600 + 50 * 60,
+        max_transfers=2,
+    )
+
+    assert any(journey["route"] == "1 → 2 → 3" and journey["transfers"] == 2 for journey in journeys)

@@ -32,8 +32,12 @@ def create_simulation(request: SimulationRequest, database: Path) -> SimulationR
     route_types = tuple(sorted({_MODE_ROUTE_TYPES[mode.value] for mode in request.transport_modes if mode.value in _MODE_ROUTE_TYPES}))
     departure_seconds = request.departure_time.hour * 3600 + request.departure_time.minute * 60 + request.departure_time.second
     cached = _RESPONSES.get(simulation_id)
-    if cached is not None:
+    if cached is not None and cached.status != "failed":
         return cached
+    if cached is not None:
+        _RESPONSES.pop(simulation_id, None)
+        _FAILURES.pop(simulation_id, None)
+        _SIMULATIONS.pop(simulation_id, None)
     report_version = report.sha256[:12]
     response = SimulationResponse(simulation_id=simulation_id, status="processing", data_version=report_version, disclaimer="Trwa liczenie dostępności po rozkładach i sieci pieszej OSM.", map_data_url=f"/api/simulations/{simulation_id}/map", reachable_stops=0, time_bands={}, sample_count=request.departure_window_minutes)
     _RESPONSES[simulation_id] = response
@@ -73,7 +77,7 @@ def _compute_simulation(simulation_id: str, request: SimulationRequest, database
         data_version=report_version,
         disclaimer=f"Wynik uśrednia starty co minutę w wybranym oknie. Obsługuje do dwóch przesiadek. {walking_note}",
         map_data_url=f"/api/simulations/{simulation_id}/map",
-        reachable_stops=len(features),
+        reachable_stops=len(stops),
         time_bands=time_bands,
         sample_count=request.departure_window_minutes,
         )

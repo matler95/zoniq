@@ -57,7 +57,7 @@ export function ScenarioWorkspace() {
     setDestination(point); setDestinationLabel(null); setJourneys([]); setNotice("Sprawdzam dokładne połączenie do wybranego punktu…");
     void fetch(`${API_URL}/api/reverse-geocode?lat=${point.lat}&lon=${point.lon}`).then(response => response.ok ? response.json() : null).then(result => setDestinationLabel(result?.label ?? null)).catch(() => undefined);
     try {
-      const response = await fetch(`${API_URL}/api/journeys`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ origin, destination: point, journey_date: date, departure_time: time, max_transfers: 1, transport_modes: selectedModes.map(mode => ({ "pieszo": "walk", "autobus": "bus", "tramwaj": "tram", "metro": "metro", SKM: "skm", KM: "km", WKD: "wkd" })[mode]) }) });
+      const response = await fetch(`${API_URL}/api/journeys`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ origin, destination: point, journey_date: date, departure_time: time, max_transfers: 2, transport_modes: selectedModes.map(mode => ({ "pieszo": "walk", "autobus": "bus", "tramwaj": "tram", "metro": "metro", SKM: "skm", KM: "km", WKD: "wkd" })[mode]) }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail ?? "Nie udało się wyznaczyć trasy.");
       setJourneys(result.journeys); setNotice(result.journeys.length ? "Pokazuję najlepszy wariant do wybranego punktu." : "W tym zakresie nie znaleziono wariantu zgodnego z filtrami.");
