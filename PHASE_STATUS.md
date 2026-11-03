@@ -15,9 +15,9 @@ i powtarzalne uruchomienie lokalne.
 | Udostępnialny scenariusz | DONE | URL przechowuje identyfikator wyniku i parametry; klient odtwarza je i pobiera trwały artefakt. |
 | Eksport mapy PNG | DONE | Canvas MapLibre z podpisem scenariusza pobierany przez przycisk „Eksport PNG”; kontrola typów przechodzi. |
 | Czytelne tryby mapy | DONE | Przełączniki Zasięg/Czas/Środki zmieniają warstwy i legendę; dominujący środek jest opisany zgodnie z metryką. |
-| Gotowość uruchomieniowa | IN_PROGRESS | Compose i Dockerfile są zwalidowane; Docker Desktop działa, lecz pełny build zatrzymuje limit 30 s podczas pobierania warstw naukowych. |
+| Gotowość uruchomieniowa | BLOCKED | Compose i Dockerfile są zwalidowane; Docker Desktop działa, lecz pełny build jest trzykrotnie przerywany przez limit 30 s podczas pobierania warstw naukowych. |
 | CI dla obu aplikacji | DONE | Workflow uruchamia `pytest apps/api/tests -q`, kontrolę typów i build webu. |
-| Testy jednostkowe, integracyjne i scenariusz użytkownika | IN_PROGRESS | 12 testów API przechodzi (w tym restart przez handler); TypeScript przechodzi. Pełny build webu i start Compose wymagają końcowej weryfikacji. |
+| Testy jednostkowe, integracyjne i scenariusz użytkownika | BLOCKED | 12 testów API przechodzi (w tym restart przez handler); TypeScript przechodzi. Pełny build webu i start Compose wymagają środowiska bez 30-sekundowego limitu polecenia. |
 
 ## Znane problemy / blokady
 
@@ -29,9 +29,11 @@ i powtarzalne uruchomienie lokalne.
 
 ## Dokładny następny krok
 
-Zakończyć build obrazów w środowisku bez limitu 30 s, uruchomić
-`docker compose up`, sprawdzić `/health` oraz stronę główną. Następnie
-oznaczyć gotowość uruchomieniową i końcową kontrolę fazy jako DONE.
+Minimalne działanie odblokowujące: uruchomić w zwykłym lokalnym terminalu
+bez 30-sekundowego limitu `docker compose up --build`, poczekać na zdrowy
+serwis API i otworzyć `http://localhost:3000`. Następnie wrócić do tego
+wątku; dokończę kontrolę `/health`, strony głównej i oznaczę fazę jako
+COMPLETE.
 
 ---
 
