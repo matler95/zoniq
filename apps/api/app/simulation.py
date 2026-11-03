@@ -64,7 +64,7 @@ def _compute_simulation(simulation_id: str, request: SimulationRequest, database
         _SIMULATIONS[simulation_id] = {
         "type": "FeatureCollection",
         "features": features,
-        "metadata": {"max_travel_minutes": request.max_travel_time_minutes, "data_version": report.sha256[:12]},
+        "metadata": {"max_travel_minutes": request.max_travel_time_minutes, "data_version": report_version},
         }
         walking_note = "Dojście do przystanków liczy lokalny graf chodników OSM." if origin_stops is not None else "Dojście do przystanków jest obecnie przybliżone, ponieważ kafel OSM dla tego punktu nie jest jeszcze gotowy."
         _RESPONSES[simulation_id] = SimulationResponse(
