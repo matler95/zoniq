@@ -2,7 +2,7 @@ from hashlib import sha256
 from pathlib import Path
 from .gtfs import find_reachable_stops, latest_report
 from .schemas import SimulationRequest, SimulationResponse
-from .walking_access import walking_origin_stops
+from .walking_access import walking_origin_stops, walking_surface
 
 
 _SIMULATIONS: dict[str, dict[str, object]] = {}
@@ -32,8 +32,14 @@ def create_simulation(request: SimulationRequest, database: Path) -> SimulationR
     features = [{
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [stop["lon"], stop["lat"]]},
-        "properties": {key: value for key, value in stop.items() if key not in {"lat", "lon"}},
+        "properties": {**{key: value for key, value in stop.items() if key not in {"lat", "lon"}}, "point_kind": "stop"},
     } for stop in stops]
+    surface = walking_surface(stops, request.max_travel_time_minutes)
+    features.extend({
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [point["lon"], point["lat"]]},
+        "properties": {"travel_minutes": point["travel_minutes"], "point_kind": "surface", "reachable_probability": 1},
+    } for point in surface)
     time_bands = {str(minutes): sum(float(stop["travel_minutes"]) <= minutes for stop in stops) for minutes in (15, 30, 45, 60, request.max_travel_time_minutes)}
     _SIMULATIONS[simulation_id] = {
         "type": "FeatureCollection",

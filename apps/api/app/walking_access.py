@@ -6,7 +6,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from .walking import walking_minutes_to_points
+from .walking import walking_minutes_to_points, walking_surface_from_stops
 
 _SOUTH, _NORTH, _WEST, _EAST = 52.05, 52.38, 20.76, 21.36
 _GRID = 4
@@ -36,6 +36,22 @@ def walking_origin_stops(database: Path, origin: tuple[float, float]) -> list[di
         {"id": stop_id, "walk_minutes": duration}
         for stop_id, duration in sorted(minutes.items(), key=lambda item: item[1])[:8]
     ]
+
+
+def walking_surface(reachable_stops: list[dict[str, object]], max_minutes: int) -> list[dict[str, float]]:
+    """Create final-walk samples grouped by their prepared OSM tile."""
+    grouped: dict[Path, list[dict[str, object]]] = {}
+    for stop in reachable_stops:
+        path = _tile_for_point(float(stop["lat"]), float(stop["lon"]))
+        if path is not None:
+            grouped.setdefault(path, []).append(stop)
+    samples: list[dict[str, float]] = []
+    # A fixed per-tile budget keeps the GeoJSON response usable in MapLibre
+    # while preserving coverage throughout the city.
+    budget = max(120, 4_000 // max(1, len(grouped)))
+    for path, stops in grouped.items():
+        samples.extend(walking_surface_from_stops(path, stops, max_minutes, sample_limit=budget))
+    return samples
 
 
 def _tile_for_point(lat: float, lon: float) -> Path | None:

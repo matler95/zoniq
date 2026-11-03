@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 from dataclasses import dataclass
 from functools import lru_cache
@@ -160,6 +161,53 @@ def walking_minutes_to_points(graph_path: Path, origin: tuple[float, float], tar
         if seconds is not None:
             result[identifier] = round(float(seconds) / 60, 2)
     return result
+
+
+def walking_surface_from_stops(
+    graph_path: Path, stops: list[dict[str, object]], max_minutes: int, sample_limit: int = 1_200,
+) -> list[dict[str, float]]:
+    """Propagate each transit arrival through the local walking graph.
+
+    Every seed carries its elapsed door-to-stop time. A multi-source Dijkstra
+    therefore yields the earliest complete journey time for graph vertices,
+    including the final walking leg.
+    """
+    if not stops:
+        return []
+    import osmnx as ox
+    from pyproj import Transformer
+
+    graph = _load_walking_graph(str(graph_path.resolve()))
+    crs = graph.graph.get("crs", "EPSG:4326")
+    transform = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    reverse = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    coordinates = [transform.transform(float(stop["lon"]), float(stop["lat"])) for stop in stops]
+    nodes = ox.distance.nearest_nodes(graph, X=[point[0] for point in coordinates], Y=[point[1] for point in coordinates])
+    distances: dict[object, float] = {}
+    queue: list[tuple[float, int, object]] = []
+    for index, (node, stop) in enumerate(zip(nodes, stops, strict=True)):
+        elapsed = float(stop["travel_minutes"]) * 60
+        if elapsed < distances.get(node, float("inf")):
+            distances[node] = elapsed
+            heapq.heappush(queue, (elapsed, index, node))
+    cutoff = max_minutes * 60
+    while queue:
+        current, _, node = heapq.heappop(queue)
+        if current != distances.get(node) or current > cutoff:
+            continue
+        for _, neighbor, attributes in graph.out_edges(node, data=True):
+            candidate = current + float(attributes["walk_seconds"])
+            if candidate <= cutoff and candidate < distances.get(neighbor, float("inf")):
+                distances[neighbor] = candidate
+                heapq.heappush(queue, (candidate, len(queue), neighbor))
+    ordered = sorted(distances.items(), key=lambda item: item[1])
+    stride = max(1, len(ordered) // sample_limit)
+    samples = []
+    for node, seconds in ordered[::stride]:
+        attributes = graph.nodes[node]
+        lon, lat = reverse.transform(float(attributes["x"]), float(attributes["y"]))
+        samples.append({"lat": round(lat, 6), "lon": round(lon, 6), "travel_minutes": round(seconds / 60, 1)})
+    return samples
 
 
 def main() -> None:

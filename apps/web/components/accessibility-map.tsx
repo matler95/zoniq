@@ -45,7 +45,7 @@ export function AccessibilityMap({ origin, destination, reachability, selectingO
         "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(0,0,0,0)", 0.15, "rgba(47,204,227,0.14)", 0.35, "rgba(104,220,119,0.3)", 0.6, "rgba(242,208,79,0.46)", 0.82, "rgba(244,150,66,0.62)", 1, "rgba(243,94,90,0.76)"],
         "heatmap-opacity": 0.85
       } });
-      instance.addLayer({ id: "reachability-stops", type: "circle", source: "reachability", paint: {
+      instance.addLayer({ id: "reachability-stops", type: "circle", source: "reachability", filter: ["==", ["get", "point_kind"], "stop"], paint: {
         "circle-radius": ["interpolate", ["linear"], ["get", "travel_minutes"], 0, 12, 15, 10, 30, 8, 45, 6, 60, 5, 180, 4],
         "circle-color": ["step", ["get", "travel_minutes"], "#f35e5a", 15, "#32cce3", 30, "#68dc77", 45, "#f2d04f", 60, "#f49642"],
         "circle-opacity": ["interpolate", ["linear"], ["coalesce", ["get", "reachable_probability"], 1], 0, 0.15, 1, 0.86],
