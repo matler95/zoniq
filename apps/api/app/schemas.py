@@ -33,6 +33,7 @@ class SimulationResponse(BaseModel):
     simulation_id: str
     status: str
     data_version: str
+    data_imported_at: str | None = None
     disclaimer: str
     map_data_url: str
     reachable_stops: int

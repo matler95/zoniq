@@ -38,5 +38,10 @@ def test_background_simulation_completes_through_http_api(tmp_path: Path, monkey
         if status.status != "processing":
             break
         time.sleep(0.02)
-    assert status.status == "completed"
+    assert status.status == "completed", simulation._FAILURES
+    assert main.get_simulation_map(started.simulation_id)["features"]
+    simulation._SIMULATIONS.clear()
+    simulation._RESPONSES.clear()
+    restored = main.get_simulation_status(started.simulation_id)
+    assert restored.status == "completed"
     assert main.get_simulation_map(started.simulation_id)["features"]

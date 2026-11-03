@@ -30,6 +30,17 @@ uvicorn app.main:app --reload --port 8000
 
 Frontend: `http://localhost:3000` · API: `http://localhost:8000/docs`.
 
+### Uruchomienie kontenerowe
+
+Po przygotowaniu danych w `data/` całą aplikację uruchamia:
+
+```bash
+docker compose up --build
+```
+
+Katalog `data/` jest montowany do API jako trwały wolumen: przechowuje
+przygotowany GTFS, kafle OSM i zapisane wyniki udostępnionych analiz.
+
 ### Walidacja GTFS
 
 Po pobraniu feedu uruchom walidację przed przetwarzaniem danych:

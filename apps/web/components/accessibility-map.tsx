@@ -2,13 +2,15 @@
 
 import maplibregl, { GeoJSONSource, Map as MapLibreMap, Marker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { useEffect, useRef } from "react";
+import { MutableRefObject, useEffect, useRef } from "react";
 
 type Coordinates = { lat: number; lon: number };
 export type ReachabilityMap = {
   type: "FeatureCollection";
   features: Array<{ type: "Feature"; geometry: { type: "Point"; coordinates: [number, number] }; properties: { travel_minutes: number; name: string; route: string; dominant_route_type?: number } }>;
 };
+export type MapView = "reachability" | "time" | "modes";
+export type MapExporter = (title: string) => void;
 
 type AccessibilityMapProps = {
   origin: Coordinates;
@@ -16,6 +18,8 @@ type AccessibilityMapProps = {
   reachability: ReachabilityMap | null;
   selectingOrigin: boolean;
   canSelectDestination: boolean;
+  view: MapView;
+  exporterRef: MutableRefObject<MapExporter | null>;
   onOriginChange: (point: Coordinates) => void;
   onDestinationChange: (point: Coordinates) => void;
 };
@@ -26,7 +30,7 @@ const osmStyle: maplibregl.StyleSpecification = {
   layers: [{ id: "osm", type: "raster", source: "osm" }]
 };
 
-export function AccessibilityMap({ origin, destination, reachability, selectingOrigin, canSelectDestination, onOriginChange, onDestinationChange }: AccessibilityMapProps) {
+export function AccessibilityMap({ origin, destination, reachability, selectingOrigin, canSelectDestination, view, exporterRef, onOriginChange, onDestinationChange }: AccessibilityMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const originMarker = useRef<Marker | null>(null);
@@ -34,7 +38,7 @@ export function AccessibilityMap({ origin, destination, reachability, selectingO
 
   useEffect(() => {
     if (!container.current || map.current) return;
-    const instance = new maplibregl.Map({ container: container.current, style: osmStyle, center: [origin.lon, origin.lat], zoom: 11.5, attributionControl: { compact: true } });
+    const instance = new maplibregl.Map({ container: container.current, style: osmStyle, center: [origin.lon, origin.lat], zoom: 11.5, attributionControl: { compact: true }, canvasContextAttributes: { preserveDrawingBuffer: true } });
     instance.addControl(new maplibregl.NavigationControl(), "bottom-right");
     instance.on("load", () => {
       instance.addSource("reachability", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -64,6 +68,34 @@ export function AccessibilityMap({ origin, destination, reachability, selectingO
     return () => { instance.remove(); map.current = null; };
   }, []);
 
+  useEffect(() => {
+    exporterRef.current = (title: string) => {
+      const source = map.current?.getCanvas();
+      if (!source) throw new Error("Mapa nie jest jeszcze gotowa do eksportu.");
+      const scale = window.devicePixelRatio || 1;
+      const headerHeight = Math.round(64 * scale);
+      const image = document.createElement("canvas");
+      image.width = source.width;
+      image.height = source.height + headerHeight;
+      const context = image.getContext("2d");
+      if (!context) throw new Error("Przeglądarka nie udostępniła obszaru eksportu.");
+      context.fillStyle = "#071428";
+      context.fillRect(0, 0, image.width, image.height);
+      context.fillStyle = "#f5f8ff";
+      context.font = `${Math.round(18 * scale)}px system-ui, sans-serif`;
+      context.fillText("zoniq · mapa dostępności", Math.round(18 * scale), Math.round(27 * scale));
+      context.fillStyle = "#9fb2c8";
+      context.font = `${Math.round(12 * scale)}px system-ui, sans-serif`;
+      context.fillText(title, Math.round(18 * scale), Math.round(49 * scale));
+      context.drawImage(source, 0, headerHeight);
+      const link = document.createElement("a");
+      link.download = "zoniq-mapa-dostepnosci.png";
+      link.href = image.toDataURL("image/png");
+      link.click();
+    };
+    return () => { exporterRef.current = null; };
+  }, [exporterRef]);
+
   useEffect(() => { originMarker.current?.setLngLat([origin.lon, origin.lat]); }, [origin]);
 
   useEffect(() => {
@@ -89,6 +121,18 @@ export function AccessibilityMap({ origin, destination, reachability, selectingO
     const update = () => (instance.getSource("reachability") as GeoJSONSource | undefined)?.setData(reachability);
     if (instance.isStyleLoaded()) update(); else instance.once("load", update);
   }, [reachability]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !instance.isStyleLoaded()) return;
+    const surfaceOpacity = view === "modes" ? 0.2 : 0.85;
+    instance.setPaintProperty("reachability-surface", "heatmap-opacity", surfaceOpacity);
+    instance.setPaintProperty("reachability-stops", "circle-color", view === "modes"
+      ? ["match", ["coalesce", ["get", "dominant_route_type"], -1], 0, "#ff554b", 1, "#3487ff", 2, "#f6f8ff", 3, "#ffe150", "#6edc8a"]
+      : ["step", ["get", "travel_minutes"], "#f35e5a", 15, "#32cce3", 30, "#68dc77", 45, "#f2d04f", 60, "#f49642"]);
+    instance.setPaintProperty("reachability-stops", "circle-stroke-color", view === "modes" ? "#071428" : ["match", ["coalesce", ["get", "dominant_route_type"], -1], 0, "#ff554b", 1, "#3487ff", 2, "#f6f8ff", 3, "#ffe150", "#ffffff"]);
+    instance.setPaintProperty("reachability-stops", "circle-stroke-width", view === "modes" ? 1 : 2);
+  }, [view]);
 
   return <div ref={container} className="map-stage" aria-label="Mapa dostępności komunikacyjnej Warszawy." />;
 }

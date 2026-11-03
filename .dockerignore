@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.venv
+**/__pycache__
+data/raw
+data/processed
+data/simulations
+data/exports

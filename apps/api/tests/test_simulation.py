@@ -42,6 +42,16 @@ def test_simulation_aggregates_each_minute_in_window(tmp_path: Path, monkeypatch
         if result.status != "processing":
             break
         __import__("time").sleep(0.02)
-    assert result.status == "completed"
+    assert result.status == "completed", simulation._FAILURES
     assert result.reachable_stops == 1
     assert result.time_bands["15"] == 1
+
+    storage = tmp_path / "simulations"
+    assert (storage / f"{result.simulation_id}.json").is_file()
+    simulation._RESPONSES.clear()
+    simulation._SIMULATIONS.clear()
+
+    restored = simulation.simulation_status(result.simulation_id, storage)
+    assert restored is not None
+    assert restored.status == "completed"
+    assert simulation.simulation_map(result.simulation_id, storage)["features"]
