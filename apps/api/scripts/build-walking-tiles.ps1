@@ -28,9 +28,13 @@ for ($column = 0; $column -lt $Grid; $column++) {
     $tileSouth = [Math]::Max($South, $South + $row * $tileHeight - $overlap)
     $tileNorth = [Math]::Min($North, $South + ($row + 1) * $tileHeight + $overlap)
     $tile = Join-Path $tilesDirectory "tile-$column-$row.graphml"
-    Write-Output "Building walking tile $column,$row"
-    & $python -u -m app.walking $tile --pbf $Pbf --north $tileNorth.ToString($culture) --south $tileSouth.ToString($culture) --east $tileEast.ToString($culture) --west $tileWest.ToString($culture)
-    if ($LASTEXITCODE -ne 0) { throw "Walking tile $column,$row failed with exit code $LASTEXITCODE" }
+    if (Test-Path $tile) {
+      Write-Output "Keeping walking tile $column,$row"
+    } else {
+      Write-Output "Building walking tile $column,$row"
+      & $python -u -m app.walking $tile --pbf $Pbf --north $tileNorth.ToString($culture) --south $tileSouth.ToString($culture) --east $tileEast.ToString($culture) --west $tileWest.ToString($culture)
+      if ($LASTEXITCODE -ne 0) { throw "Walking tile $column,$row failed with exit code $LASTEXITCODE" }
+    }
     $tilePaths.Add($tile)
   }
 }
