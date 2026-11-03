@@ -7,6 +7,7 @@ from .geocoding import reverse_address, search_address
 from .gtfs import find_direct_journeys, find_one_transfer_journeys, latest_report
 from .schemas import JourneyRequest, JourneyResponse, SimulationRequest, SimulationResponse
 from .simulation import create_simulation, simulation_map
+from .walking_access import walking_origin_stops
 
 app = FastAPI(title="zoniq API", version="0.1.0", description="API planowych analiz dostępności komunikacyjnej.")
 app.add_middleware(
@@ -72,6 +73,8 @@ def post_journey(request: JourneyRequest) -> JourneyResponse:
     report = latest_report(GTFS_DATABASE)
     departure_seconds = request.departure_time.hour * 3600 + request.departure_time.minute * 60 + request.departure_time.second
     route_types = tuple(sorted({_MODE_ROUTE_TYPES[mode.value] for mode in request.transport_modes if mode.value in _MODE_ROUTE_TYPES}))
+    origin_stops = walking_origin_stops(GTFS_DATABASE, (request.origin.lat, request.origin.lon))
+    destination_stops = walking_origin_stops(GTFS_DATABASE, (request.destination.lat, request.destination.lon))
     direct = find_direct_journeys(
         GTFS_DATABASE,
         (request.origin.lat, request.origin.lon),
@@ -79,8 +82,13 @@ def post_journey(request: JourneyRequest) -> JourneyResponse:
         request.journey_date,
         departure_seconds,
         route_types=route_types,
+        origin_stops=origin_stops,
+        destination_stops=destination_stops,
     )
-    with_transfer = find_one_transfer_journeys(GTFS_DATABASE, (request.origin.lat, request.origin.lon), (request.destination.lat, request.destination.lon), request.journey_date, departure_seconds, route_types) if request.max_transfers else []
+    with_transfer = find_one_transfer_journeys(
+        GTFS_DATABASE, (request.origin.lat, request.origin.lon), (request.destination.lat, request.destination.lon),
+        request.journey_date, departure_seconds, route_types, origin_stops=origin_stops, destination_stops=destination_stops,
+    ) if request.max_transfers else []
     journeys = sorted([*direct, *with_transfer], key=lambda journey: float(journey["duration_minutes"]))[:3]
     return JourneyResponse(
         data_version=report.sha256[:12] if report else "unprepared",

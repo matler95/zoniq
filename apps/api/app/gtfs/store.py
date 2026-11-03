@@ -64,6 +64,8 @@ def find_direct_journeys(
     departure_seconds: int,
     limit: int = 3,
     route_types: tuple[int, ...] | None = None,
+    origin_stops: list[dict[str, float | str]] | None = None,
+    destination_stops: list[dict[str, float | str]] | None = None,
 ) -> list[dict[str, object]]:
     """Find scheduled journeys without transfers plus walking approaches.
 
@@ -74,8 +76,8 @@ def find_direct_journeys(
     if not database.is_file():
         return []
     with sqlite3.connect(database) as connection:
-        origin_stops = _nearby_stops(connection, *origin)
-        destination_stops = _nearby_stops(connection, *destination)
+        origin_stops = _nearby_stops(connection, *origin) if origin_stops is None else origin_stops
+        destination_stops = _nearby_stops(connection, *destination) if destination_stops is None else destination_stops
         if not origin_stops or not destination_stops:
             return []
         origin_ids = tuple(stop["id"] for stop in origin_stops)
@@ -126,6 +128,8 @@ def find_one_transfer_journeys(
     departure_seconds: int,
     route_types: tuple[int, ...] | None = None,
     limit: int = 3,
+    origin_stops: list[dict[str, float | str]] | None = None,
+    destination_stops: list[dict[str, float | str]] | None = None,
 ) -> list[dict[str, object]]:
     """Find a scheduled journey with at most one same-stop transfer.
 
@@ -136,8 +140,8 @@ def find_one_transfer_journeys(
     if not database.is_file():
         return []
     with sqlite3.connect(database) as connection:
-        origin_stops = _nearby_stops(connection, *origin)
-        destination_stops = _nearby_stops(connection, *destination)
+        origin_stops = _nearby_stops(connection, *origin) if origin_stops is None else origin_stops
+        destination_stops = _nearby_stops(connection, *destination) if destination_stops is None else destination_stops
         active_services = _active_services(connection, journey_date)
         if not origin_stops or not destination_stops or not active_services or route_types == ():
             return []
