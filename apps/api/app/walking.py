@@ -127,7 +127,7 @@ def merge_walking_graphs(sources: list[Path], destination: Path) -> WalkingGraph
     return report
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=1)
 def _load_walking_graph(graph_path: str) -> nx.MultiDiGraph:
     import osmnx as ox
 
