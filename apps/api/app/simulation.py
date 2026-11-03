@@ -1,11 +1,15 @@
 from hashlib import sha256
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from .gtfs import find_reachable_stops, latest_report
 from .schemas import SimulationRequest, SimulationResponse
 from .walking_access import walking_origin_stops, walking_surface
 
 
 _SIMULATIONS: dict[str, dict[str, object]] = {}
+_RESPONSES: dict[str, SimulationResponse] = {}
+_FAILURES: dict[str, str] = {}
+_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="zoniq-simulation")
 _MODE_ROUTE_TYPES = {
     "bus": 3,
     "tram": 0,
@@ -27,36 +31,55 @@ def create_simulation(request: SimulationRequest, database: Path) -> SimulationR
     simulation_id = f"sim_{sha256(payload.encode()).hexdigest()[:10]}"
     route_types = tuple(sorted({_MODE_ROUTE_TYPES[mode.value] for mode in request.transport_modes if mode.value in _MODE_ROUTE_TYPES}))
     departure_seconds = request.departure_time.hour * 3600 + request.departure_time.minute * 60 + request.departure_time.second
-    origin_stops = walking_origin_stops(database, (request.origin.lat, request.origin.lon))
-    stops = _aggregate_departure_window(request, database, route_types, departure_seconds, origin_stops)
-    features = [{
+    cached = _RESPONSES.get(simulation_id)
+    if cached is not None:
+        return cached
+    report_version = report.sha256[:12]
+    response = SimulationResponse(simulation_id=simulation_id, status="processing", data_version=report_version, disclaimer="Trwa liczenie dostępności po rozkładach i sieci pieszej OSM.", map_data_url=f"/api/simulations/{simulation_id}/map", reachable_stops=0, time_bands={}, sample_count=request.departure_window_minutes)
+    _RESPONSES[simulation_id] = response
+    _EXECUTOR.submit(_compute_simulation, simulation_id, request, database, route_types, departure_seconds, report_version)
+    return response
+
+
+def simulation_status(simulation_id: str) -> SimulationResponse | None:
+    return _RESPONSES.get(simulation_id)
+
+
+def _compute_simulation(simulation_id: str, request: SimulationRequest, database: Path, route_types: tuple[int, ...], departure_seconds: int, report_version: str) -> None:
+    try:
+        origin_stops = walking_origin_stops(database, (request.origin.lat, request.origin.lon))
+        stops = _aggregate_departure_window(request, database, route_types, departure_seconds, origin_stops)
+        features = [{
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [stop["lon"], stop["lat"]]},
         "properties": {**{key: value for key, value in stop.items() if key not in {"lat", "lon"}}, "point_kind": "stop"},
-    } for stop in stops]
-    surface = walking_surface(stops, request.max_travel_time_minutes)
-    features.extend({
+        } for stop in stops]
+        surface = walking_surface(stops, request.max_travel_time_minutes)
+        features.extend({
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [point["lon"], point["lat"]]},
         "properties": {"travel_minutes": point["travel_minutes"], "point_kind": "surface", "reachable_probability": 1},
-    } for point in surface)
-    time_bands = {str(minutes): sum(float(stop["travel_minutes"]) <= minutes for stop in stops) for minutes in (15, 30, 45, 60, request.max_travel_time_minutes)}
-    _SIMULATIONS[simulation_id] = {
+        } for point in surface)
+        time_bands = {str(minutes): sum(float(stop["travel_minutes"]) <= minutes for stop in stops) for minutes in (15, 30, 45, 60, request.max_travel_time_minutes)}
+        _SIMULATIONS[simulation_id] = {
         "type": "FeatureCollection",
         "features": features,
         "metadata": {"max_travel_minutes": request.max_travel_time_minutes, "data_version": report.sha256[:12]},
-    }
-    walking_note = "Dojście do przystanków liczy lokalny graf chodników OSM." if origin_stops is not None else "Dojście do przystanków jest obecnie przybliżone, ponieważ kafel OSM dla tego punktu nie jest jeszcze gotowy."
-    return SimulationResponse(
+        }
+        walking_note = "Dojście do przystanków liczy lokalny graf chodników OSM." if origin_stops is not None else "Dojście do przystanków jest obecnie przybliżone, ponieważ kafel OSM dla tego punktu nie jest jeszcze gotowy."
+        _RESPONSES[simulation_id] = SimulationResponse(
         simulation_id=simulation_id,
         status="completed",
-        data_version=report.sha256[:12],
-        disclaimer=f"Wynik uśrednia starty co minutę w wybranym oknie. Obsługuje kursy bezpośrednie i jedną przesiadkę na tym samym przystanku. {walking_note}",
+        data_version=report_version,
+        disclaimer=f"Wynik uśrednia starty co minutę w wybranym oknie. Obsługuje do dwóch przesiadek. {walking_note}",
         map_data_url=f"/api/simulations/{simulation_id}/map",
         reachable_stops=len(features),
         time_bands=time_bands,
         sample_count=request.departure_window_minutes,
-    )
+        )
+    except Exception as error:
+        _FAILURES[simulation_id] = str(error)
+        _RESPONSES[simulation_id] = SimulationResponse(simulation_id=simulation_id, status="failed", data_version=report_version, disclaimer="Nie udało się obliczyć symulacji.", map_data_url=f"/api/simulations/{simulation_id}/map", reachable_stops=0, time_bands={}, sample_count=request.departure_window_minutes)
 
 
 def simulation_map(simulation_id: str) -> dict[str, object] | None:

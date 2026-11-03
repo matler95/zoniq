@@ -7,7 +7,7 @@ const modes = ["pieszo", "autobus", "tramwaj", "metro", "SKM", "KM", "WKD"];
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const defaultOrigin = { lat: 52.196, lon: 21.022 };
 type Point = { lat: number; lon: number };
-type Simulation = { simulation_id: string; map_data_url: string; reachable_stops: number; disclaimer: string; data_version: string; time_bands: Record<string, number>; sample_count: number };
+type Simulation = { simulation_id: string; status: "processing" | "completed" | "failed"; map_data_url: string; reachable_stops: number; disclaimer: string; data_version: string; time_bands: Record<string, number>; sample_count: number };
 type GeocodeResult = { label: string; lat: number; lon: number };
 type Journey = { route: string; duration_minutes: number; access_walk_minutes: number; egress_walk_minutes: number; departure_seconds: number; arrival_seconds: number; transfers?: number };
 
@@ -75,10 +75,20 @@ export function ScenarioWorkspace() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail ?? "Nie udało się utworzyć symulacji.");
-      const mapResponse = await fetch(`${API_URL}${result.map_data_url}`);
+      let completed = result as Simulation;
+      for (let attempt = 0; completed.status === "processing" && attempt < 180; attempt += 1) {
+        setNotice(`Obliczam dostępność po OSM… ${Math.min(99, Math.round((attempt + 1) / 180 * 100))}%`);
+        await new Promise(resolve => window.setTimeout(resolve, 1_000));
+        const statusResponse = await fetch(`${API_URL}/api/simulations/${result.simulation_id}`);
+        if (!statusResponse.ok) throw new Error("Nie udało się odczytać statusu symulacji.");
+        completed = await statusResponse.json();
+      }
+      if (completed.status === "failed") throw new Error(completed.disclaimer);
+      if (completed.status !== "completed") throw new Error("Obliczanie trwa zbyt długo — spróbuj krótszego okna analizy.");
+      const mapResponse = await fetch(`${API_URL}${completed.map_data_url}`);
       if (!mapResponse.ok) throw new Error("Nie udało się pobrać warstwy mapy.");
-      setMapData(await mapResponse.json()); setSimulation(result); setDestination(null); setDestinationLabel(null); setJourneys([]);
-      setNotice(`Pokazuję ${result.reachable_stops} osiągalnych przystanków w limicie ${limit} min.`);
+      setMapData(await mapResponse.json()); setSimulation(completed); setDestination(null); setDestinationLabel(null); setJourneys([]);
+      setNotice(`Pokazuję ${completed.reachable_stops} osiągalnych przystanków w limicie ${limit} min.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : "Nie mogę połączyć się z API."); }
     finally { setIsLoading(false); }
   }

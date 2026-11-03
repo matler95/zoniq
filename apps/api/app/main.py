@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .geocoding import reverse_address, search_address
 from .gtfs import find_direct_journeys, find_one_transfer_journeys, latest_report
 from .schemas import JourneyRequest, JourneyResponse, SimulationRequest, SimulationResponse
-from .simulation import create_simulation, simulation_map
+from .simulation import create_simulation, simulation_map, simulation_status
 from .walking_access import walking_origin_stops
 
 app = FastAPI(title="zoniq API", version="0.1.0", description="API planowych analiz dostępności komunikacyjnej.")
@@ -63,6 +63,14 @@ def post_simulation(request: SimulationRequest) -> SimulationResponse:
 @app.get("/api/simulations/{simulation_id}/map")
 def get_simulation_map(simulation_id: str) -> dict[str, object]:
     result = simulation_map(simulation_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Nie znaleziono symulacji.")
+    return result
+
+
+@app.get("/api/simulations/{simulation_id}", response_model=SimulationResponse)
+def get_simulation_status(simulation_id: str) -> SimulationResponse:
+    result = simulation_status(simulation_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Nie znaleziono symulacji.")
     return result
